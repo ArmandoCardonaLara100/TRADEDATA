@@ -16,5 +16,6 @@ docs/spreadsheet/workbook-audit.json
 docs/spreadsheet/inventory.txt
 .DS_Store
 .idea/
+.vercel/
 .vscode/
 *.swp
