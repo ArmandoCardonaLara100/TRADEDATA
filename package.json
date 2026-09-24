@@ -9,9 +9,11 @@
   "start": "next start --hostname 0.0.0.0",
   "typecheck": "tsc --noEmit",
   "test": "vitest run",
-  "test:e2e": "playwright test",
-  "db:migrate": "tsx --env-file-if-exists=.env.local scripts/migrate.ts",
-  "db:generate": "drizzle-kit generate"
+  "test:e2e": "node scripts/test-supabase.mjs",
+  "db:migrate": "supabase db push --linked",
+  "db:types": "supabase gen types --linked --schema public",
+  "legacy:db:migrate": "tsx --env-file-if-exists=.env.local scripts/migrate.ts",
+  "legacy:db:generate": "drizzle-kit generate"
  },
  "engines": {
   "node": ">=22.16.0"
@@ -19,6 +21,9 @@
  "dependencies": {
   "@electric-sql/pglite": "^0.5.8",
   "@radix-ui/react-dialog": "^1.1.23",
+  "@supabase/server": "^1.8.0",
+  "@supabase/ssr": "0.12.7",
+  "@supabase/supabase-js": "2.117.1",
   "better-auth": "^1.7.5",
   "decimal.js": "^10.6.0",
   "drizzle-orm": "^0.45.3",
@@ -46,8 +51,6 @@
   "vitest": "^5.0.1"
  },
  "overrides": {
-  "@esbuild-kit/core-utils": {
-   "esbuild": "^0.28.2"
-  }
+  "esbuild": "^0.28.2"
  }
 }

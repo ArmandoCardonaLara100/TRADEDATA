@@ -1,3 +1,4 @@
+// Legacy backend retained for local data recovery only. The live app uses Supabase Auth.
 import {betterAuth} from 'better-auth';
 import {drizzleAdapter} from 'better-auth/adapters/drizzle';
 import {connection} from './database';

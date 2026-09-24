@@ -1,0 +1,1 @@
+-- Intentionally empty. Real user workspaces start without demo trades.

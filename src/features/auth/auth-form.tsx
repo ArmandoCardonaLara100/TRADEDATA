@@ -9,16 +9,18 @@ import {Button, ErrorMessage, Field} from '@/components/ui';
 import {authClient} from '@/lib/auth-client';
 import {message} from '@/lib/client';
 
-export function AuthForm({register = false}: {register?: boolean}) {
+export function AuthForm({register = false, initialError = ''}: {register?: boolean; initialError?: string}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(initialError);
   const [show, setShow] = useState(false);
+  const [notice, setNotice] = useState('');
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
     setError('');
+    setNotice('');
     const form = new FormData(event.currentTarget);
 
     try {
@@ -30,6 +32,7 @@ export function AuthForm({register = false}: {register?: boolean}) {
         ? await authClient.signUp.email({...credentials, name: String(form.get('name')).trim()})
         : await authClient.signIn.email(credentials);
       if (result.error) throw new Error(result.error.message || 'Unable to sign in. Check your details.');
+      if (result.requiresConfirmation) {setNotice('Check your email to confirm your account, then sign in.');return;}
       router.push('/dashboard');
       router.refresh();
     } catch (cause) {
@@ -57,6 +60,7 @@ export function AuthForm({register = false}: {register?: boolean}) {
         <h2>{register ? 'Create your workspace' : 'Back to the bigger picture.'}</h2>
         <p>{register ? 'Build a trading record you can learn from.' : 'Sign in to your trading workspace.'}</p>
         <ErrorMessage error={error}/>
+        {notice && <p role="status">{notice}</p>}
         {register && <Field label="Your name"><input name="name" autoComplete="name" placeholder="Armando Cardona" required maxLength={80}/></Field>}
         <Field label="Email address"><input name="email" type="email" autoComplete="email" placeholder="you@example.com" required maxLength={254}/></Field>
         <div className="field">

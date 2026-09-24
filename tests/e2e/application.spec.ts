@@ -3,20 +3,47 @@ import {randomBytes} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import AxeBuilder from '@axe-core/playwright';
 import {workbookFixture} from '../workbook-fixture';
+import {createClient} from '@supabase/supabase-js';
 const base=process.env.TEST_BASE_URL||'http://localhost:3000';
 const origin={Origin:base};
 const credentials={email:`qa-${Date.now()}@example.test`,password:randomBytes(24).toString('base64url'),name:'QA Workspace'};
 let owner:APIRequestContext,outsider:APIRequestContext,accountId:string,tradeId:string;
+const testUserIds:string[]=[];
+const admin=createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.SUPABASE_TEST_SECRET_KEY!,{auth:{persistSession:false,autoRefreshToken:false}});
 test.beforeAll(async({playwright})=>{
+ for(const email of [credentials.email,`other-${credentials.email}`]){
+  const {data,error}=await admin.auth.admin.createUser({email,password:credentials.password,email_confirm:true,user_metadata:{name:credentials.name}});
+  if(error)throw new Error(`Test user provisioning failed: ${error.code}`);
+  testUserIds.push(data.user.id);
+ }
  owner=await playwright.request.newContext({baseURL:base,extraHTTPHeaders:origin});outsider=await playwright.request.newContext({baseURL:base,extraHTTPHeaders:origin});
- const a=await owner.post('/api/auth/sign-up/email',{data:credentials});expect(a.status(),await a.text()).toBe(200);
- const b=await outsider.post('/api/auth/sign-up/email',{data:{...credentials,email:`other-${credentials.email}`}});expect(b.status(),await b.text()).toBe(200);
+ const a=await owner.post('/api/auth/sign-in/email',{data:credentials});expect(a.status(),await a.text()).toBe(200);
+ const b=await outsider.post('/api/auth/sign-in/email',{data:{...credentials,email:`other-${credentials.email}`}});expect(b.status(),await b.text()).toBe(200);
  const file=process.env.SOURCE_WORKBOOK?await readFile(process.env.SOURCE_WORKBOOK):workbookFixture();
  const response=await owner.post('/api/import',{multipart:{file:{name:'Trading Web.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:file}}});expect(response.status(),await response.text()).toBe(201);const result=await response.json();accountId=result.imported[1].id;
  const pref=await owner.patch('/api/preferences',{data:{theme:'dark',accountId}});expect(pref.status()).toBe(200);
  tradeId=(await (await owner.get(`/api/trades?accountId=${accountId}`)).json()).trades[0].id;
 });
-test.afterAll(async()=>{await owner?.dispose();await outsider?.dispose();});
+test.afterAll(async()=>{await owner?.dispose();await outsider?.dispose();for(const id of testUserIds){const {error}=await admin.auth.admin.deleteUser(id);if(error)throw new Error(`Test user cleanup failed: ${error.code}`);}});
+test('hosted Supabase RLS isolates users without application filtering',async()=>{
+ const client=createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,{auth:{persistSession:false,autoRefreshToken:false}});
+ const {error:loginError}=await client.auth.signInWithPassword({email:`other-${credentials.email}`,password:credentials.password});expect(loginError).toBeNull();
+ for(const table of ['trading_accounts','trades','account_records','trade_records']){
+  const {data,error}=await client.from(table).select('*').eq('user_id',testUserIds[0]);expect(error).toBeNull();expect(data).toEqual([]);
+ }
+ const stolen=await client.from('trades').insert({user_id:testUserIds[1],accountId,sequence:9999,pnl:99});expect(stolen.error?.code).toBe('23503');
+ const forged=await client.from('trading_accounts').insert({user_id:testUserIds[0],name:'forged',initialBalance:100});expect(forged.error?.code).toBe('42501');
+ const rpc=await client.rpc('save_trade',{p_data:{accountId,pnl:'99'}});expect(rpc.error?.code).toBe('P0002');
+ const changed=await client.from('trades').update({pnl:999}).eq('id',tradeId).select();expect(changed.error).toBeNull();expect(changed.data).toEqual([]);
+ const deleted=await client.from('trading_accounts').delete().eq('id',accountId).select();expect(deleted.data).toEqual([]);
+ const own=await client.from('trading_accounts').insert({user_id:testUserIds[1],name:'B isolation check',initialBalance:100}).select('id').single();expect(own.error).toBeNull();
+ const otherClient=createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,{auth:{persistSession:false,autoRefreshToken:false}});
+ expect((await otherClient.auth.signInWithPassword(credentials)).error).toBeNull();
+ const otherRead=await otherClient.from('account_records').select('*').eq('id',own.data!.id);expect(otherRead.error).toBeNull();expect(otherRead.data).toEqual([]);
+ const otherWrite=await otherClient.from('trading_accounts').delete().eq('id',own.data!.id).select();expect(otherWrite.error).toBeNull();expect(otherWrite.data).toEqual([]);
+ await client.from('trading_accounts').delete().eq('id',own.data!.id);await otherClient.auth.signOut({scope:'local'});
+ await client.auth.signOut({scope:'local'});
+});
 test('authenticated parity, validation, isolated access and conflicting edits',async({request})=>{
  expect((await request.get('/api/workspace')).status()).toBe(401);
  const result=await (await owner.get(`/api/workspace?accountId=${accountId}`)).json();expect(result.analytics.total).toBe(38);expect(result.analytics.balance).toBe(6352);expect(result.analytics.netProfit).toBe(352);expect(result.analytics.worksheetBreakEvenCount).toBe(10);
@@ -32,7 +59,7 @@ test('authenticated parity, validation, isolated access and conflicting edits',a
  expect(created.status()).toBe(422);
  const trade=await (await owner.post('/api/trades',{data:{accountId:account.id,symbol:'TEST',pnl:'100',riskPercent:'0.01',rewardRisk:'2'}})).json();expect(trade.version).toBe(1);
  const updated=await owner.patch(`/api/trades/${trade.id}`,{data:{accountId:account.id,pnl:'150',symbol:'TEST',version:1}});expect(updated.status()).toBe(200);
- expect((await owner.patch(`/api/trades/${trade.id}`,{data:{accountId:account.id,pnl:'200',version:1}})).status()).toBe(409);
+ expect((await owner.patch(`/api/trades/${trade.id}`,{data:{accountId:account.id,pnl:'200',version:1},timeout:10000})).status()).toBe(409);
  expect((await outsider.delete(`/api/trades/${trade.id}?version=2`)).status()).toBe(409);
  const balance=await (await owner.get(`/api/workspace?accountId=${account.id}`)).json();expect(balance.analytics.balance).toBe(1150);
  expect((await owner.delete(`/api/trades/${trade.id}?version=2`)).status()).toBe(200);expect((await owner.delete(`/api/accounts/${account.id}`)).status()).toBe(200);
@@ -46,6 +73,7 @@ test('concurrent operation creation uses unique sequences',async()=>{
 });
 test('login, import parity, journal filters, editing, saving and deletion through UI',async({page})=>{
  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
+ page.on('console',entry=>{if(entry.type()==='error')errors.push(entry.text());});
  await page.goto('/login');await page.getByLabel('Email address').fill(credentials.email);await page.getByLabel('Password',{exact:true}).fill(credentials.password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page).toHaveURL(/dashboard/);
  await expect(page.getByText('$6,352.00',{exact:true})).toBeVisible();
  await page.getByRole('link',{name:'Trading journal',exact:true}).click();await expect(page.getByRole('table')).toBeVisible();
@@ -59,7 +87,12 @@ test('login, import parity, journal filters, editing, saving and deletion throug
  await page.getByRole('link',{name:'Monte Carlo',exact:true}).click();await expect(page.getByText('Possible account paths')).toBeVisible();await expect(page.locator('.simulation-chart svg')).toBeVisible();
  await page.getByRole('button',{name:'Save',exact:true}).click();await page.getByLabel('Scenario name').fill('Verified simulation');await page.getByRole('button',{name:'Save scenario',exact:true}).click();await expect(page.getByText('Scenario saved to your workspace.')).toBeVisible();
  await page.getByRole('link',{name:'Funded accounts',exact:true}).click();await expect(page.getByText('$104.00',{exact:true})).toBeVisible();await page.getByLabel('Cost per account ($)').fill('30');await expect(page.getByText('$90.00',{exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Save',exact:true}).click();await page.getByLabel('Scenario name').fill('Verified bankroll');await page.getByRole('button',{name:'Save scenario',exact:true}).click();await expect(page.getByRole('dialog')).not.toBeVisible();
+ await page.reload();await page.getByRole('button',{name:'Saved scenarios',exact:true}).click();await page.getByRole('button',{name:/^Verified bankroll/}).click();await expect(page.getByLabel('Cost per account ($)')).toHaveValue('30');await expect(page.getByText('$90.00',{exact:true})).toBeVisible();
  expect(errors).toEqual([]);await page.getByRole('button',{name:'Log out'}).click();await expect(page).toHaveURL(/login/);await page.goto('/journal');await expect(page).toHaveURL(/login/);
+ await page.getByLabel('Email address').fill(credentials.email);await page.getByLabel('Password',{exact:true}).fill(credentials.password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page).toHaveURL(/dashboard/);await expect(page.getByText('$6,352.00',{exact:true})).toBeVisible();
+ for(const path of ['/statistics','/settings']){await page.goto(path);await expect(page.locator('main#main')).toBeVisible();}
+ expect(errors).toEqual([]);
 });
 test('responsive themes, navigation and accessibility',async({page})=>{
  const state=await owner.storageState();await page.context().addCookies(state.cookies);

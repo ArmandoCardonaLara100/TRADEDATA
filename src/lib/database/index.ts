@@ -1,3 +1,4 @@
+// Legacy database tooling only; no application route imports this connection.
 import {drizzle as drizzlePg,type NodePgDatabase} from 'drizzle-orm/node-postgres';
 import {drizzle as drizzleLocal} from 'drizzle-orm/pglite';
 import {migrate as migratePg} from 'drizzle-orm/node-postgres/migrator';

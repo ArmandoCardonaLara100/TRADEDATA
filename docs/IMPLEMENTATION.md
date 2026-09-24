@@ -33,7 +33,7 @@ Four worksheets: SEPTIEMBRE 2026 (213 formulas), AGOSTO-DICIEMBRE 2026 (824), SI
 
 ## Architecture and implementation order
 
-This is a standalone SaaS codebase with app-owned registration/login, not a workspace-authenticated Sites page. Next.js App Router, React, TypeScript, semantic CSS tokens, accessible dialog primitives, Recharts, Zod, decimal.js, Better Auth and Drizzle/PostgreSQL. Local development uses persistent PGlite (PostgreSQL engine) without external credentials; deployment uses DATABASE_URL and managed PostgreSQL. Production requires an explicit session secret and trusted origin. No billing code.
+This is a standalone SaaS codebase with app-owned registration/login, not a workspace-authenticated Sites page. Next.js App Router, React, TypeScript, semantic CSS tokens, accessible dialog primitives, Recharts, Zod and decimal.js remain unchanged. Supabase Auth and PostgreSQL now serve local and deployed application requests, with cookie refresh in Next.js proxy, RLS on every user table, and decimal-as-text views for numerical fidelity. Original Better Auth/Drizzle/PGlite tooling remains available only for legacy recovery; the old local database is preserved. No billing code.
 
 1. Complete source inventory and fixtures; define raw input/domain contracts.
 2. Pure decimal analytics, calculators, Monte Carlo state transitions and bankroll logic; parity tests.
