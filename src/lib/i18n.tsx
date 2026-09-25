@@ -22,6 +22,7 @@ const messages={
  }
 } as const;
 export type MessageKey=keyof typeof messages.en;
+export const literalMessageKeys:Record<string,MessageKey>={'ACCOUNT OVERVIEW':'page.dashboardEyebrow','The bigger picture.':'page.dashboardTitle','Your performance, one operation at a time.':'page.dashboardDescription','YOUR RECORD':'page.journalEyebrow','Trading journal':'page.journalTitle','Document the setup. Review the execution. Learn from the result.':'page.journalDescription','PERFORMANCE ANALYSIS':'page.statisticsEyebrow','Know your numbers':'page.statisticsTitle','PLAN THE EXPOSURE':'page.calculatorEyebrow','Trading calculator':'page.calculatorTitle','The workbook’s position and commission calculations, in one place.':'page.calculatorDescription','THE PROBABILITY LAB':'page.monteEyebrow','One strategy. Many possibilities.':'page.monteTitle','Explore how the same assumptions can lead to different outcomes.':'page.monteDescription','BANKROLL & FUNDED ACCOUNTS':'page.fundedEyebrow','Know the cost of the opportunity.':'page.fundedTitle','Translate evaluation costs and pass probability into a bankroll scenario.':'page.fundedDescription'};
 type Context={language:Language;setLanguage:(value:Language)=>void;t:(key:MessageKey)=>string};
 const LanguageContext=createContext<Context|null>(null);
 export function LanguageProvider({children}:{children:ReactNode}){
