@@ -71,6 +71,14 @@ test('concurrent operation creation uses unique sequences',async()=>{
  expect(results.every(r=>r.status()===201)).toBe(true);const rows=await Promise.all(results.map(r=>r.json()));expect(new Set(rows.map(t=>t.sequence)).size).toBe(8);
  expect((await owner.delete(`/api/accounts/${a.id}`)).status()).toBe(200);
 });
+test('public authentication navigation and Google OAuth initiation are complete',async({page,request})=>{
+ await page.goto('/');await page.getByRole('link',{name:'Log in',exact:true}).click();await expect(page).toHaveURL(/\/login$/);
+ await expect(page.getByRole('button',{name:'Continue with Google',exact:true})).toBeVisible();await expect(page.getByRole('link',{name:'Back to Home',exact:true})).toBeVisible();
+ await page.getByLabel('Color theme').selectOption('system');expect(await page.evaluate(()=>localStorage.getItem('theme'))).toBe('system');expect(['light','dark']).toContain(await page.getAttribute('html','data-theme'));
+ await page.getByLabel('Language').selectOption('es');await expect(page.getByRole('button',{name:'Continuar con Google',exact:true})).toBeVisible();await page.getByRole('link',{name:'Volver al inicio',exact:true}).click();await expect(page).toHaveURL(base+'/');
+ await page.goto('/auth/callback?flow=google');await expect(page).toHaveURL(/\/login\?authError=oauth$/);await expect(page.locator('.error-message')).toContainText('No se pudo completar el acceso con Google');
+ const response=await request.post('/api/auth/sign-in/google',{headers:origin,data:{}});expect(response.status(),await response.text()).toBe(200);const payload=await response.json();const authorization=new URL(payload.url);expect(authorization.pathname).toContain('/auth/v1/authorize');expect(authorization.searchParams.get('provider')).toBe('google');const redirect=authorization.searchParams.get('redirect_to')||'';expect(redirect).toContain('/auth/callback');expect(redirect).toContain('flow=google');
+});
 test('login, import parity, journal filters, editing, saving and deletion through UI',async({page})=>{
  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
  page.on('console',entry=>{if(entry.type()==='error')errors.push(entry.text());});
@@ -89,7 +97,7 @@ test('login, import parity, journal filters, editing, saving and deletion throug
  await page.getByRole('link',{name:'Funded accounts',exact:true}).click();await expect(page.getByText('$104.00',{exact:true})).toBeVisible();await page.getByLabel('Cost per account ($)').fill('30');await expect(page.getByText('$90.00',{exact:true})).toBeVisible();
  await page.getByRole('button',{name:'Save',exact:true}).click();await page.getByLabel('Scenario name').fill('Verified bankroll');await page.getByRole('button',{name:'Save scenario',exact:true}).click();await expect(page.getByRole('dialog')).not.toBeVisible();
  await page.reload();await page.getByRole('button',{name:'Saved scenarios',exact:true}).click();await page.getByRole('button',{name:/^Verified bankroll/}).click();await expect(page.getByLabel('Cost per account ($)')).toHaveValue('30');await expect(page.getByText('$90.00',{exact:true})).toBeVisible();
- expect(errors).toEqual([]);await page.getByRole('button',{name:'Log out'}).click();await expect(page).toHaveURL(/login/);await page.goto('/journal');await expect(page).toHaveURL(/login/);
+ expect(errors).toEqual([]);await page.getByRole('button',{name:'Log out'}).click();await expect(page).toHaveURL(base+'/');await page.goto('/journal');await expect(page).toHaveURL(/login/);
  await page.getByLabel('Email address').fill(credentials.email);await page.getByLabel('Password',{exact:true}).fill(credentials.password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page).toHaveURL(/dashboard/);await expect(page.getByText('$6,352.00',{exact:true})).toBeVisible();
  for(const path of ['/statistics','/settings']){await page.goto(path);await expect(page.locator('main#main')).toBeVisible();}
  expect(errors).toEqual([]);

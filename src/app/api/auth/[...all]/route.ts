@@ -13,6 +13,13 @@ export const POST=(request:Request)=>handle(async()=>{
   if(error)throw new HttpError(503,'Could not sign out. Please try again.');
   return Response.json({});
  }
+ if(path==='/api/auth/sign-in/google'){
+  const callback=new URL('/auth/callback',appUrl());
+  callback.searchParams.set('flow','google');
+  const {data,error}=await client.auth.signInWithOAuth({provider:'google',options:{redirectTo:callback.href}});
+  if(error||!data.url)throw new HttpError(503,'Google sign-in could not be started. Please try again.');
+  return Response.json({url:data.url});
+ }
  if(!['/api/auth/sign-in/email','/api/auth/sign-up/email'].includes(path))throw new HttpError(404,'Authentication route not found.');
  const data=credentials.parse(await readJson(request));
  if(path==='/api/auth/sign-up/email'){

@@ -13,8 +13,12 @@ export const currentUser=cache(async()=>{
 });
 export async function requireUser(){const user=await currentUser();if(!user)throw new HttpError(401,'Sign in to continue.');return user;}
 export function verifyOrigin(request:Request){
- const origin=request.headers.get('origin'),allowed=appUrl();
- if(!origin||origin!==new URL(allowed).origin)throw new HttpError(403,'This request came from an untrusted origin.');
+ const origin=request.headers.get('origin'),configured=new URL(appUrl()),allowed=new Set([configured.origin]);
+ if(process.env.NODE_ENV==='development'){
+  const port=configured.port||'3000';
+  allowed.add(`http://localhost:${port}`);allowed.add(`http://127.0.0.1:${port}`);
+ }
+ if(!origin||!allowed.has(origin))throw new HttpError(403,'This request came from an untrusted origin.');
 }
 export async function readJson(request:Request){if(Number(request.headers.get('content-length')||0)>100000)throw new HttpError(413,'Request is too large.');const text=await request.text();if(text.length>100000)throw new HttpError(413,'Request is too large.');try{return JSON.parse(text);}catch{throw new HttpError(400,'Invalid JSON.');}}
 export function errorResponse(error:unknown){
