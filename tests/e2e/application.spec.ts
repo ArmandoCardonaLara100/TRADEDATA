@@ -114,3 +114,44 @@ test('responsive themes, navigation and accessibility',async({page})=>{
  }
  await page.locator('button[aria-label="Open navigation"]').evaluate((button:HTMLButtonElement)=>button.click());await expect(page.getByRole('dialog')).toBeVisible();await page.getByRole('dialog').getByRole('link',{name:'Monte Carlo',exact:true}).click();await expect(page.getByText('Possible account paths')).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);await page.screenshot({path:'.data/monte-carlo-mobile.png',fullPage:true});
 });
+test('numeric inputs stay natural, account deletion refreshes safely, and the brand returns home',async({page})=>{
+ const state=await owner.storageState();await page.context().addCookies(state.cookies);
+ await page.goto('/monte-carlo');
+ for(const value of ['12','13','12.5','0.25']){await page.getByRole('spinbutton',{name:'Profit target',exact:true}).fill(value);await expect(page.getByRole('spinbutton',{name:'Profit target',exact:true})).toHaveValue(value);}
+ await page.getByText('Capital & reproducibility').click();
+ for(const value of ['1000','1000.75']){await page.getByLabel('Starting balance ($)').fill(value);await expect(page.getByLabel('Starting balance ($)')).toHaveValue(value);}
+
+ const created=await (await owner.post('/api/accounts',{data:{name:'Deletion UI test',initialBalance:'1000.00000000',breakEvenBand:'12.50000000'}})).json();
+ await page.goto('/settings');await page.getByLabel('Edit Deletion UI test').click();
+ await expect(page.getByLabel('Initial balance')).toHaveValue('1000');await expect(page.getByLabel('Break-even band')).toHaveValue('12.5');
+ await page.getByRole('button',{name:'Cancel',exact:true}).click();
+ await page.getByLabel('Trading account',{exact:true}).selectOption(created.id);
+ await page.getByRole('button',{name:'Delete trading account: Deletion UI test'}).first().click();
+ await expect(page.getByRole('dialog')).toContainText('Your TRADEDATA login account will not be deleted.');
+ await page.getByRole('button',{name:'Delete account',exact:true}).click();
+ await expect(page.getByText('Trading account deleted.')).toBeVisible();
+ await expect(page.getByLabel('Trading account',{exact:true}).locator(`option[value="${created.id}"]`)).toHaveCount(0);
+
+ for(const path of ['/dashboard','/statistics','/monte-carlo','/settings']){
+  await page.goto(path);await page.getByRole('link',{name:'Go to TRADEDATA home'}).first().click();await expect(page).toHaveURL(base+'/');
+ }
+ await page.goto('/dashboard');await expect(page.locator('main#main')).toBeVisible();
+});
+
+test('deleting the last trading account keeps the session and shows the empty state',async({page})=>{
+ const only=await (await outsider.post('/api/accounts',{data:{name:'Only account',initialBalance:'1000'}})).json();
+ const state=await outsider.storageState();await page.context().addCookies(state.cookies);await page.goto('/dashboard');
+ await expect(page.getByLabel('Trading account',{exact:true})).toHaveValue(only.id);
+ await page.getByRole('button',{name:'Delete trading account: Only account'}).first().click();await page.getByRole('button',{name:'Delete account',exact:true}).click();
+ await expect(page.getByText('Your trading story starts here')).toBeVisible();await expect(page).toHaveURL(/dashboard/);
+ await page.reload();await expect(page.getByText('Your trading story starts here')).toBeVisible();
+});
+
+test('a failed trading-account deletion leaves the account available',async({page})=>{
+ const created=await (await owner.post('/api/accounts',{data:{name:'Deletion failure test',initialBalance:'1000'}})).json();
+ const state=await owner.storageState();await page.context().addCookies(state.cookies);await page.goto('/dashboard');await page.getByLabel('Trading account',{exact:true}).selectOption(created.id);
+ await page.route(`**/api/accounts/${created.id}`,route=>route.fulfill({status:500,contentType:'application/json',body:JSON.stringify({error:'Internal details'})}));
+ await page.getByRole('button',{name:'Delete trading account: Deletion failure test'}).first().click();await page.getByRole('button',{name:'Delete account',exact:true}).click();
+ await expect(page.getByText('The trading account could not be deleted. Please try again.')).toBeVisible();await expect(page.getByLabel('Trading account',{exact:true})).toHaveValue(created.id);
+ await page.unroute(`**/api/accounts/${created.id}`);expect((await owner.delete(`/api/accounts/${created.id}`)).status()).toBe(200);
+});

@@ -7,6 +7,25 @@ export function classify(pnl: string | number | null, band: string | number): Ou
  return p.gt(b) ? 'win' : p.lt(b.negated()) ? 'loss' : 'breakeven';
 }
 
+/** Average P&L of classified wins divided by 1% of the account's opening balance. */
+export function calculateWinningRiskReward(
+ trades: Pick<Trade,'pnl'>[],
+ openingBalance: string | number | null | undefined,
+ breakEvenBand: string | number,
+) {
+ if (openingBalance===null||openingBalance===undefined||String(openingBalance).trim()==='') return null;
+ try {
+  const initial=new D(openingBalance);
+  if(!initial.isFinite()||initial.lte(0))return null;
+  const wins=trades.filter(trade=>trade.pnl!==null&&classify(trade.pnl,breakEvenBand)==='win');
+  if(!wins.length)return null;
+  const value=sum(wins.map(trade=>trade.pnl!)).div(wins.length).div(initial.times('0.01'));
+  return value.isFinite()?value.toNumber():null;
+ } catch {
+  return null;
+ }
+}
+
 /** H/I/J use initial capital, not peak equity. See docs/IMPLEMENTATION.md. */
 export function calculateAnalytics(trades: Trade[], account: Pick<TradingAccount,'initialBalance'|'breakEvenBand'|'baselineBreakEven'|'riskMetric'>) {
  const initial = new D(account.initialBalance);
@@ -61,7 +80,7 @@ export function calculateAnalytics(trades: Trade[], account: Pick<TradingAccount
   averageDuration:mean(ordered.flatMap(t=>t.duration===null?[]:[t.duration])),
   worksheetRisk:account.riskMetric==='average-win'?(averageWin===null?null:ratio(averageWin,60)):mean(ordered.flatMap(t=>t.rewardRisk===null?[]:[t.rewardRisk])),
   worksheetBreakEvenCount,worksheetBreakEvenAverage:ratio(totalOf(breakEven),worksheetBreakEvenCount),
-  grossProfit,grossLoss,profitFactor:ratio(grossProfit,grossLoss),expectancy:ratio(net.toNumber(),completed.length),
+  grossProfit,grossLoss,profitFactor:ratio(grossProfit,grossLoss),riskReward:calculateWinningRiskReward(completed,account.initialBalance,account.breakEvenBand),expectancy:ratio(net.toNumber(),completed.length),
   largestWin:positive.length?Math.max(...positive.map(t=>Number(t.pnl))):null,
   largestLoss:negative.length?Math.min(...negative.map(t=>Number(t.pnl))):null,
   averageR:mean(realizedR),totalR:sum(realizedR).toNumber(),maxDrawdown:maxDrawdown.toNumber(),

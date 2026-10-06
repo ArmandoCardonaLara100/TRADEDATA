@@ -54,6 +54,18 @@ test('trade updates reject stale versions and return precise money',async()=>{
   await expect(db.query('select save_trade($1::jsonb,$2)',[JSON.stringify({accountId,pnl:'100',version:1}),row.id])).rejects.toMatchObject({code:'PT409'});
  });
 });
+test('deleting a trading account cascades trades without deleting the auth user',async()=>{
+ await asUser(a,async()=>{
+  const created=await db.query<{id:string}>(`insert into trading_accounts(user_id,name,"initialBalance") values ($1,'Deletion test','1000') returning id`,[a]);
+  const id=created.rows[0].id;
+  await db.query('select save_trade($1::jsonb)',[JSON.stringify({accountId:id,pnl:'12.5'})]);
+  await db.query('update preferences set "selectedAccountId"=$1 where user_id=$2',[id,a]);
+  await db.query('delete from trading_accounts where id=$1',[id]);
+  expect((await db.query('select * from trades where "accountId"=$1',[id])).rows).toHaveLength(0);
+  expect((await db.query<{selectedAccountId:string|null}>('select "selectedAccountId" from preferences where user_id=$1',[a])).rows[0].selectedAccountId).toBeNull();
+ });
+ expect((await db.query('select id from auth.users where id=$1',[a])).rows).toHaveLength(1);
+});
 test('anonymous role has no access and RPCs do not bypass RLS',async()=>{
  await db.exec('set role anon');
  try {
