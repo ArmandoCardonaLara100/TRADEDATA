@@ -11,7 +11,7 @@ type PreviewImage = { src: string; alt: string; width: number; height: number; s
 
 function ProductFrame({ label, kind = 'chart', preview }: { label: string; kind?: 'chart' | 'table'; preview?: PreviewImage }) {
   return <figure className={`landing-frame ${kind}${preview ? ' preview-frame' : ''}`} data-placeholder={label}>
-    <figcaption><span className="frame-dot" /><span>{label}</span><small>16:10 / REPLACEABLE MEDIA</small></figcaption>
+    <figcaption><span className="frame-dot" /><span>{label}</span></figcaption>
     {preview ? <div className="landing-image-canvas"><Image src={preview.src} alt={preview.alt} width={preview.width} height={preview.height} sizes={preview.sizes} className="landing-preview-image" /></div> : kind === 'table' ? <div className="frame-canvas" aria-label={label}><div className="frame-table">{Array.from({ length: 6 }, (_, index) => <div key={index}><span /><span /><span /><span className={index % 3 === 1 ? 'loss' : ''} /></div>)}</div></div> : <div className="frame-canvas" aria-label={label}><div className="frame-metrics"><span /><span /><span /><span /></div><svg viewBox="0 0 600 210" role="img" aria-label="Illustrative equity curve"><path className="frame-grid" d="M0 35H600M0 88H600M0 141H600M0 194H600" /><path className="frame-line ghost" d="M0 178L48 147 97 160 148 104 196 128 250 89 305 111 353 65 401 93 451 41 503 57 552 29 600 44" /><path className="frame-line" d="M0 188L48 164 97 174 148 128 196 143 250 105 305 124 353 88 401 103 451 65 503 74 552 43 600 51" /></svg></div>}
   </figure>;
 }
