@@ -71,6 +71,20 @@ test('concurrent operation creation uses unique sequences',async()=>{
  expect(results.every(r=>r.status()===201)).toBe(true);const rows=await Promise.all(results.map(r=>r.json()));expect(new Set(rows.map(t=>t.sequence)).size).toBe(8);
  expect((await owner.delete(`/api/accounts/${a.id}`)).status()).toBe(200);
 });
+test('review submission, moderation and public publication remain ownership-scoped',async({request})=>{
+ const own=await owner.post('/api/reviews',{data:{reviewText:'Owner review must remain pending.'}});expect(own.status(),await own.text()).toBe(201);
+ const ownReview=await own.json();expect(ownReview.status).toBe('pending');
+ const other=await outsider.post('/api/reviews',{data:{reviewText:'A second trader review for moderation.'}});expect(other.status(),await other.text()).toBe(201);
+ const otherReview=await other.json();expect(otherReview.status).toBe('pending');
+ const role=await admin.from('user_roles').upsert({user_id:testUserIds[0],role:'review_admin'});expect(role.error).toBeNull();
+ expect((await owner.patch(`/api/reviews/${ownReview.id}`,{data:{action:'approve'}})).status()).toBe(403);
+ const approved=await owner.patch(`/api/reviews/${otherReview.id}`,{data:{action:'approve'}});expect(approved.status(),await approved.text()).toBe(200);expect((await approved.json()).status).toBe('approved');
+ const landing=await request.get('/');expect(landing.status()).toBe(200);expect(await landing.text()).toContain(otherReview.reviewText);
+ const client=createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,{auth:{persistSession:false,autoRefreshToken:false}});
+ expect((await client.auth.signInWithPassword({email:`other-${credentials.email}`,password:credentials.password})).error).toBeNull();
+ const tamper=await client.from('review_submissions').update({status:'rejected'}).eq('id',otherReview.id).select();expect(tamper.error).toBeNull();expect(tamper.data).toEqual([]);
+ await client.auth.signOut({scope:'local'});
+});
 test('public authentication navigation and Google OAuth initiation are complete',async({page,request})=>{
  await page.goto('/');await page.getByRole('link',{name:'Log in',exact:true}).click();await expect(page).toHaveURL(/\/login$/);
  await expect(page.getByRole('button',{name:'Continue with Google',exact:true})).toBeVisible();await expect(page.getByRole('link',{name:'Back to Home',exact:true})).toBeVisible();
@@ -84,6 +98,7 @@ test('login, import parity, journal filters, editing, saving and deletion throug
  page.on('console',entry=>{if(entry.type()==='error')errors.push(entry.text());});
  await page.goto('/login');await page.getByLabel('Email address').fill(credentials.email);await page.getByLabel('Password',{exact:true}).fill(credentials.password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page).toHaveURL(/dashboard/);
  await expect(page.getByText('$6,352.00',{exact:true})).toBeVisible();
+ await expect(page.getByRole('link',{name:'Calculator',exact:true})).toHaveCount(0);
  await page.getByRole('link',{name:'Trading journal',exact:true}).click();await expect(page.getByRole('table')).toBeVisible();
  await page.getByLabel('Filter by result').selectOption('win');await expect(page.getByText('1–11 of 11 operations')).toBeVisible();
  await page.getByLabel('Search operations').fill('GBP/USD');await expect(page.getByText('1–4 of 4 operations')).toBeVisible();
@@ -91,7 +106,6 @@ test('login, import parity, journal filters, editing, saving and deletion throug
  await page.getByRole('button',{name:'Record operation',exact:true}).first().click();await page.getByLabel('Instrument',{exact:true}).fill('QA/USD');await page.getByLabel('Net result (USD)').fill('125');await page.getByLabel('Risk per trade (%)').fill('1');await page.getByLabel('Planned reward / risk (R)').fill('2');await page.getByRole('button',{name:'Record operation',exact:true}).last().click();await expect(page.getByRole('dialog')).not.toBeVisible();
  await page.getByLabel('Search operations').fill('QA/USD');await page.getByText('QA/USD',{exact:true}).click();await page.getByRole('button',{name:'Edit operation',exact:true}).click();await page.getByLabel('Net result (USD)').fill('150');await page.getByRole('button',{name:'Save changes',exact:true}).click();await expect(page.getByText('+$150.00',{exact:true})).toBeVisible();
  await page.reload();await expect(page.getByText('+$150.00',{exact:true})).toBeVisible();await page.getByText('QA/USD',{exact:true}).click();await page.getByRole('button',{name:'Delete',exact:true}).click();await page.getByRole('button',{name:'Delete operation',exact:true}).click();await expect(page.getByRole('dialog')).not.toBeVisible();
- await page.getByRole('link',{name:'Calculator',exact:true}).click();await expect(page.getByText('$59.58',{exact:true})).toBeVisible();await page.getByLabel('Cash at risk ($)').fill('60');await expect(page.getByText('$65.00',{exact:true})).toBeVisible();
  await page.getByRole('link',{name:'Monte Carlo',exact:true}).click();await expect(page.getByText('Possible account paths')).toBeVisible();await expect(page.locator('.simulation-chart svg')).toBeVisible();
  await page.getByRole('button',{name:'Save',exact:true}).click();await page.getByLabel('Scenario name').fill('Verified simulation');await page.getByRole('button',{name:'Save scenario',exact:true}).click();await expect(page.getByText('Scenario saved to your workspace.')).toBeVisible();
  await page.getByRole('link',{name:'Funded accounts',exact:true}).click();await expect(page.getByText('$104.00',{exact:true})).toBeVisible();await page.getByLabel('Cost per account ($)').fill('30');await expect(page.getByText('$90.00',{exact:true})).toBeVisible();
@@ -99,7 +113,7 @@ test('login, import parity, journal filters, editing, saving and deletion throug
  await page.reload();await page.getByRole('button',{name:'Saved scenarios',exact:true}).click();await page.getByRole('button',{name:/^Verified bankroll/}).click();await expect(page.getByLabel('Cost per account ($)')).toHaveValue('30');await expect(page.getByText('$90.00',{exact:true})).toBeVisible();
  expect(errors).toEqual([]);await page.getByRole('button',{name:'Log out'}).click();await expect(page).toHaveURL(base+'/');await page.goto('/journal');await expect(page).toHaveURL(/login/);
  await page.getByLabel('Email address').fill(credentials.email);await page.getByLabel('Password',{exact:true}).fill(credentials.password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page).toHaveURL(/dashboard/);await expect(page.getByText('$6,352.00',{exact:true})).toBeVisible();
- for(const path of ['/statistics','/settings']){await page.goto(path);await expect(page.locator('main#main')).toBeVisible();}
+ for(const path of ['/statistics','/review','/settings']){await page.goto(path);await expect(page.locator('main#main')).toBeVisible();}
  expect(errors).toEqual([]);
 });
 test('responsive themes, navigation and accessibility',async({page})=>{

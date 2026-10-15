@@ -1,10 +1,11 @@
 import {supabaseServer} from '../supabase/server';
 import {HttpError} from './http';
 import {calculateAnalytics} from '../analytics/journal';
-import {accountSchema,tradeSchema,scenarioSchema} from '../validation/schemas';
+import {accountSchema,tradeSchema,scenarioSchema,reviewSubmissionSchema,reviewModerationSchema} from '../validation/schemas';
 import type {Trade,TradingAccount} from '@/types/trading';
 import type {Json} from '../supabase/types';
 import type {parseWorkbook} from '../import/workbook';
+import type {ReviewSubmission,ReviewWorkspace,ReviewStatus} from '@/types/reviews';
 
 type DbError={code:string;message:string;details?:string};
 export function check(error:DbError|null) {
@@ -25,6 +26,11 @@ function tradeDto(raw:unknown):Trade {
  const t=raw as Trade;
  if(!t?.id||(t.pnl!==null&&typeof t.pnl!=='string'))throw new Error('Invalid operation response.');
  return t;
+}
+function reviewDto(raw:unknown):ReviewSubmission {
+ const review=raw as {id?:string;user_id?:string;reviewer_name?:string;review_text?:string;status?:ReviewStatus;submitted_at?:string;approved_at?:string|null;approved_by?:string|null};
+ if(!review?.id||!review.user_id||!review.reviewer_name||!review.review_text||!review.submitted_at||!['pending','approved','rejected'].includes(review.status||''))throw new Error('Invalid review response.');
+ return {id:review.id,userId:review.user_id,reviewerName:review.reviewer_name,reviewText:review.review_text,status:review.status!,submittedAt:review.submitted_at,approvedAt:review.approved_at||null,approvedBy:review.approved_by||null};
 }
 export async function ownedAccount(userId:string,id:string){
  const db=await supabaseServer();
@@ -134,4 +140,48 @@ export async function savePreferences(userId:string,theme:'light'|'dark'|'system
 export async function importWorkbook(parsed:ReturnType<typeof parseWorkbook>){
  const db=await supabaseServer(),result=await db.rpc('import_workbook',{p_sheets:parsed as unknown as Json});
  check(result.error);return result.data;
+}
+export async function isReviewAdmin(userId:string){
+ const db=await supabaseServer(),{data,error}=await db.from('user_roles').select('role').eq('user_id',userId).eq('role','review_admin').maybeSingle();
+ check(error);return Boolean(data);
+}
+export async function getReviewWorkspace(userId:string):Promise<ReviewWorkspace>{
+ const db=await supabaseServer();
+ const [reviews,admin]=await Promise.all([
+  db.from('review_submissions').select('*').order('submitted_at',{ascending:false}),
+  isReviewAdmin(userId),
+ ]);
+ check(reviews.error);
+ return {reviews:(reviews.data||[]).map(reviewDto),isAdmin:admin};
+}
+export async function getApprovedReviews(){
+ const db=await supabaseServer(),{data,error}=await db.from('review_submissions').select('*').eq('status','approved').order('approved_at',{ascending:false}).limit(6);
+ check(error);return (data||[]).map(reviewDto);
+}
+export async function submitReview(userId:string,raw:unknown){
+ const {reviewText}=reviewSubmissionSchema.parse(raw),db=await supabaseServer();
+ // The database trigger replaces these ownership and status values with the
+ // authenticated user's profile data before RLS evaluates the insert.
+ const {data,error}=await db.from('review_submissions').insert({user_id:userId,reviewer_name:'Submitting user',review_text:reviewText,status:'pending'}).select('*').single();
+ check(error);return reviewDto(data);
+}
+export async function moderateReview(userId:string,id:string,raw:unknown){
+  const {action}=reviewModerationSchema.parse(raw);
+ if(!await isReviewAdmin(userId))throw new HttpError(403,'You do not have permission to moderate reviews.');
+ const db=await supabaseServer();
+ const target=await db.from('review_submissions').select('user_id').eq('id',id).maybeSingle();
+ check(target.error);if(!target.data)throw new HttpError(404,'Review not found.');
+ if(target.data.user_id===userId)throw new HttpError(403,'Administrators cannot moderate their own reviews.');
+ const status:ReviewStatus=action==='approve'?'approved':'rejected';
+ const {data,error}=await db.from('review_submissions').update({status}).eq('id',id).select('*').maybeSingle();
+ check(error);if(!data)throw new HttpError(404,'Review not found.');return reviewDto(data);
+}
+export async function removeReview(userId:string,id:string){
+ if(!await isReviewAdmin(userId))throw new HttpError(403,'You do not have permission to delete reviews.');
+ const db=await supabaseServer();
+ const target=await db.from('review_submissions').select('user_id').eq('id',id).maybeSingle();
+ check(target.error);if(!target.data)throw new HttpError(404,'Review not found.');
+ if(target.data.user_id===userId)throw new HttpError(403,'Administrators cannot delete their own reviews.');
+ const {data,error}=await db.from('review_submissions').delete().eq('id',id).select('id');
+ check(error);if(!data?.length)throw new HttpError(404,'Review not found.');
 }

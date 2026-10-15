@@ -73,3 +73,25 @@ test('anonymous role has no access and RPCs do not bypass RLS',async()=>{
   await expect(db.query("select import_workbook('[]')")).rejects.toThrow(/permission denied/);
  } finally {await db.exec('reset role');}
 });
+test('reviews stay pending until a different authorized moderator approves them',async()=>{
+ let reviewId:string;
+ await db.query('insert into user_roles(user_id,role) values($1,$2)',[a,'review_admin']);
+ await asUser(b,async()=>{
+  await db.query('insert into profiles(id,name) values($1,$2) on conflict (id) do update set name=excluded.name',[b,'Trader B']);
+  const inserted=await db.query<{id:string;user_id:string;reviewer_name:string;status:string}>(`insert into review_submissions(user_id,reviewer_name,review_text,status) values($1,'Forged name','Useful and private','approved') returning id,user_id,reviewer_name,status`,[a]);
+  const review=inserted.rows[0];reviewId=review.id;
+  expect(review.user_id).toBe(b);expect(review.reviewer_name).toBe('Trader B');expect(review.status).toBe('pending');
+  expect((await db.query('select * from review_submissions')).rows).toHaveLength(1);
+  expect((await db.query(`update review_submissions set status='approved' where id=$1 returning id`,[review.id])).rows).toHaveLength(0);
+ });
+ await db.exec('set role anon');
+ try {expect((await db.query('select * from review_submissions')).rows).toHaveLength(0);} finally {await db.exec('reset role');}
+ await asUser(a,async()=>{
+  expect((await db.query('select * from review_submissions where id=$1',[reviewId!])).rows).toHaveLength(1);
+  const approved=await db.query<{status:string;approved_by:string}>(`update review_submissions set status='approved' where id=$1 returning status,approved_by`,[reviewId!]);
+  expect(approved.rows[0].status).toBe('approved');expect(approved.rows[0].approved_by).toBe(a);
+  const own=await db.query<{id:string}>(`insert into review_submissions(user_id,reviewer_name,review_text) values($1,'Ignored','My own review') returning id`,[a]);
+  expect((await db.query(`update review_submissions set status='approved' where id=$1 returning id`,[own.rows[0].id])).rows).toHaveLength(0);
+ });
+ await asUser(b,async()=>expect((await db.query<{status:string}>('select status from review_submissions where id=$1',[reviewId!])).rows[0].status).toBe('approved'));
+});

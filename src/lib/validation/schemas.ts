@@ -18,3 +18,5 @@ export const scenarioSchema=z.discriminatedUnion('kind',[
  z.object({name:z.string().trim().min(1).max(80),kind:z.literal('simulation'),input:simulationSchema}),
  z.object({name:z.string().trim().min(1).max(80),kind:z.literal('bankroll'),input:bankrollSchema}),
 ]);
+export const reviewSubmissionSchema=z.object({reviewText:z.string().trim().min(3,'Write at least 3 characters.').max(1600,'Keep your review under 1,600 characters.')});
+export const reviewModerationSchema=z.object({action:z.enum(['approve','reject'])});

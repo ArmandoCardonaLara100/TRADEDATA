@@ -68,6 +68,39 @@ export type Database = {
         }
         Relationships: []
       }
+      review_submissions: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          id: string
+          review_text: string
+          reviewer_name: string
+          status: string
+          submitted_at: string
+          user_id: string
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          id?: string
+          review_text: string
+          reviewer_name: string
+          status?: string
+          submitted_at?: string
+          user_id: string
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          id?: string
+          review_text?: string
+          reviewer_name?: string
+          status?: string
+          submitted_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       scenarios: {
         Row: {
           createdAt: string
@@ -241,6 +274,24 @@ export type Database = {
           riskMetric?: string
           sourceHash?: string | null
           sourceSheet?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          created_at: string
+          role: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          role: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          role?: string
           user_id?: string
         }
         Relationships: []

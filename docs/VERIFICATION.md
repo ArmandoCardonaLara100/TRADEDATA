@@ -2,7 +2,7 @@
 
 ## Scope and fixes
 
-The original journal, analytics, calculator, Monte Carlo worker, bankroll projections, charts and UI were already implemented. This change replaces live Better Auth/PGlite/Drizzle access with Supabase Auth and PostgreSQL, preserving those calculations and workflows. The original Vercel failure was `DATABASE_URL is required in production`, digest `1573689593`, confirmed in deployment runtime logs. The new runtime does not require DATABASE_URL.
+The original journal, analytics and Monte Carlo worker, bankroll projections, charts and UI were already implemented. This change replaces live Better Auth/PGlite/Drizzle access with Supabase Auth and PostgreSQL, preserving those calculations and workflows. The original Vercel failure was `DATABASE_URL is required in production`, digest `1573689593`, confirmed in deployment runtime logs. The new runtime does not require DATABASE_URL.
 
 A hosted regression test uncovered a second problem: using SQLSTATE `40001` for an ordinary stale-edit conflict made PostgREST retry a nonrecoverable request. Migration `20260924161417_trade_conflict_status.sql` uses `PT409`; the API returns HTTP 409 within the test's 10-second deadline. See [Supabase's explanation](https://supabase.com/docs/guides/troubleshooting/high-cpu-and-infinite-transaction-retries-when-using-custom-error-codes-in-rpc-functions-77326b).
 
@@ -29,7 +29,7 @@ A hosted regression test uncovered a second problem: using SQLSTATE `40001` for 
 | Dependency audit | Zero known vulnerabilities after applying the esbuild override correctly |
 | Lint | No lint script/configuration exists; not reported as a passed lint check |
 
-Hosted E2E coverage includes two distinct users, direct PostgREST reads/writes and RPC calls in both isolation directions, forged ownership, foreign-account inserts, anonymous API access, trusted-origin enforcement, invalid input, stale edits, concurrent sequence allocation, workbook import and aggregate parity, UI journal creation/edit/delete, refresh persistence, calculator, simulation chart, saved bankroll reload, logout/login restoration, statistics/settings direct routes, desktop/tablet/mobile layouts and both themes. Browser page errors and console errors were asserted absent in the UI flow. Automated accessibility checks exclude color-contrast; they are not a full accessibility certification.
+Hosted E2E coverage includes two distinct users, direct PostgREST reads/writes and RPC calls in both isolation directions, forged ownership, foreign-account inserts, anonymous API access, trusted-origin enforcement, invalid input, stale edits, concurrent sequence allocation, workbook import and aggregate parity, UI journal creation/edit/delete, refresh persistence, simulation chart, saved bankroll reload, logout/login restoration, statistics/settings direct routes, desktop/tablet/mobile layouts and both themes. Browser page errors and console errors were asserted absent in the UI flow. Automated accessibility checks exclude color-contrast; they are not a full accessibility certification.
 
 QA users are uniquely generated and deleted by the suite. The hosted database contained zero users after cleanup. Legacy `.data/` remains intact and is not automatically assigned to a new Supabase identity.
 

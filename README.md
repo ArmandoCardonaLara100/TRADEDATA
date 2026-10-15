@@ -1,6 +1,6 @@
 # TRADEDATA
 
-A private trading journal and probability workbench. Raw operations drive statistics, equity/drawdown charts, spreadsheet calculators, Monte Carlo simulations and funded-account bankroll projections. This is an analytical tool, not a source of trading recommendations. No billing or subscriptions are implemented.
+A private trading journal and probability workbench. Raw operations drive statistics, equity/drawdown charts, Monte Carlo simulations and funded-account bankroll projections. This is an analytical tool, not a source of trading recommendations. No billing or subscriptions are implemented.
 
 ## Technology
 
@@ -33,7 +33,7 @@ supabase link --project-ref YOUR_PROJECT_REF
 npm run db:migrate
 ```
 
-Migrations create six user-owned tables (`profiles`, `trading_accounts`, `trades`, `strategies`, `scenarios`, `preferences`), RLS policies, precision-preserving invoker views and transactional journal/import functions. Every user-owned table references `auth.users`; composite foreign keys prevent attaching records to another user's account. Persist raw inputs, not cached analytics or simulation paths.
+Migrations create the user-owned profile, account, journal, strategy, scenario, preference and review tables, plus a tightly controlled review-role table. Reviews begin pending; only a separately managed `review_admin` role can moderate another user's review. RLS policies, precision-preserving invoker views and transactional journal/import functions protect each user's data. Persist raw inputs, not cached analytics or simulation paths.
 
 Enable email/password authentication and email confirmation in Supabase. Configure a verified SMTP sender before opening registration to arbitrary users: Supabase's default email service restricts delivery. Set the Auth Site URL to the production domain and allow `/auth/callback` on that domain and localhost. Preview callbacks must be explicitly scoped to your own Vercel project. The server uses Vercel's trusted deployment URL for preview origins. Provision a separate Supabase environment for preview testing; do not silently share production data with previews.
 
@@ -68,7 +68,7 @@ Run E2E tests against `npm start` or set `TEST_BASE_URL` to a deployed test targ
 ```text
 src/app/             Pages, protected routes, API handlers and auth callback
 src/components/      Shared UI and charts
-src/features/        Dashboard, journal, statistics, calculator and simulations
+src/features/        Dashboard, journal, statistics, reviews and simulations
 src/lib/analytics/   Spreadsheet-derived statistical functions
 src/lib/supabase/    Browser/server clients, configuration and database types
 src/lib/server/      Authenticated repository and request guards

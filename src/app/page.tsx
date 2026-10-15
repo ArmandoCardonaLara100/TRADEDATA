@@ -1,4 +1,6 @@
 import type {Metadata} from 'next';
 import {LandingPage} from '@/features/landing/landing-page';
+import {getApprovedReviews} from '@/lib/server/repository';
 export const metadata:Metadata={title:'Trading analytics built on evidence',description:'Record operations, measure performance and risk, and explore possible outcomes with TRADEDATA trading analytics and simulation.',alternates:{canonical:'/'},robots:{index:true,follow:true},openGraph:{title:'TRADEDATA — Trade with a record. Decide with evidence.',description:'A trading journal, analytics workbench and probability simulator built for disciplined review.',type:'website',url:'/'},twitter:{card:'summary_large_image',title:'TRADEDATA — Trading analytics built on evidence',description:'Journal, analytics, risk tools and Monte Carlo simulation for traders.'}};
-export default function Home(){return <LandingPage/>;}
+export const dynamic='force-dynamic';
+export default async function Home(){return <LandingPage reviews={await getApprovedReviews()}/>;}
