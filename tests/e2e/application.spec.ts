@@ -24,7 +24,12 @@ test.beforeAll(async({playwright})=>{
  const pref=await owner.patch('/api/preferences',{data:{theme:'dark',accountId}});expect(pref.status()).toBe(200);
  tradeId=(await (await owner.get(`/api/trades?accountId=${accountId}`)).json()).trades[0].id;
 });
-test.afterAll(async()=>{await owner?.dispose();await outsider?.dispose();for(const id of testUserIds){const {error}=await admin.auth.admin.deleteUser(id);if(error)throw new Error(`Test user cleanup failed: ${error.code}`);}});
+test.afterAll(async()=>{
+ await owner?.dispose();await outsider?.dispose();
+ // An approved review references its moderator, so remove test reviews before test users.
+ if(testUserIds.length){const {error}=await admin.from('review_submissions').delete().in('user_id',testUserIds);if(error)throw new Error(`Test review cleanup failed: ${error.code}`);}
+ for(const id of testUserIds){const {error}=await admin.auth.admin.deleteUser(id);if(error)throw new Error(`Test user cleanup failed: ${error.message}`);}
+});
 test('hosted Supabase RLS isolates users without application filtering',async()=>{
  const client=createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,{auth:{persistSession:false,autoRefreshToken:false}});
  const {error:loginError}=await client.auth.signInWithPassword({email:`other-${credentials.email}`,password:credentials.password});expect(loginError).toBeNull();
@@ -71,6 +76,64 @@ test('concurrent operation creation uses unique sequences',async()=>{
  expect(results.every(r=>r.status()===201)).toBe(true);const rows=await Promise.all(results.map(r=>r.json()));expect(new Set(rows.map(t=>t.sequence)).size).toBe(8);
  expect((await owner.delete(`/api/accounts/${a.id}`)).status()).toBe(200);
 });
+test('calendar follows dated journal changes and keeps account ownership',async({request,page})=>{
+ expect((await request.get('/api/calendar?accountId=unknown&month=2026-10')).status()).toBe(401);
+ expect((await outsider.get(`/api/calendar?accountId=${accountId}&month=2026-10`)).status()).toBe(404);
+ expect((await owner.get(`/api/calendar?accountId=${accountId}&month=2026-13`)).status()).toBe(422);
+ const account=await (await owner.post('/api/accounts',{data:{name:'Calendar test',initialBalance:'1000'}})).json();
+ const create=async(pnl:string)=>{
+  const response=await owner.post('/api/trades',{data:{accountId:account.id,date:'2026-10-05',symbol:'TEST',pnl}});
+  expect(response.status(),await response.text()).toBe(201);
+  return response.json();
+ };
+ const first=await create('100');
+ const second=await create('-40');
+ const read=async()=>{
+  const response=await owner.get(`/api/calendar?accountId=${account.id}&month=2026-10`);
+  expect(response.status(),await response.text()).toBe(200);
+  return (await response.json()).trades;
+ };
+ expect((await read()).map((trade:{id:string})=>trade.id)).toEqual([first.id,second.id]);
+ expect((await owner.patch('/api/preferences',{data:{theme:'dark',accountId:account.id}})).status()).toBe(200);
+ const state=await owner.storageState();await page.context().addCookies(state.cookies);
+ await page.goto('/calendar');
+ await expect(page.getByRole('heading',{name:'October 2026'})).toBeVisible();
+ const day=page.getByRole('button',{name:/October 5, 2026.*2 operations.*\+\$60\.00/});
+ await expect(day).toBeVisible();await day.click();
+ await expect(page.getByRole('dialog').getByText('TEST')).toHaveCount(2);
+ await expect(page.getByRole('dialog').getByText('+$60.00')).toBeVisible();
+ await page.getByRole('dialog').getByRole('button',{name:'Close dialog'}).click();
+ await page.setViewportSize({width:390,height:844});
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+ await page.screenshot({path:'.data/calendar-mobile.png',fullPage:true});
+ for(const width of [320,768,1366,1920]){
+  await page.setViewportSize({width,height:900});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+ }
+ await page.getByRole('button',{name:'Next month'}).click();
+ await expect(page.getByRole('heading',{name:'November 2026'})).toBeVisible();
+ await page.getByRole('button',{name:'Previous month'}).click();
+ await expect(page.getByRole('heading',{name:'October 2026'})).toBeVisible();
+ await page.getByLabel('Language').selectOption('es');
+ await expect(page.getByRole('heading',{name:'Calendario de trading'})).toBeVisible();
+ await page.getByLabel('Language').selectOption('en');
+ for(const theme of ['light','dark','system']){
+  await page.getByLabel('Color theme').selectOption(theme);
+  expect(['light','dark']).toContain(await page.getAttribute('html','data-theme'));
+ }
+ const changed=await owner.patch(`/api/trades/${second.id}`,{data:{accountId:account.id,date:'2026-10-06',symbol:'TEST',pnl:'-40',version:second.version}});
+ expect(changed.status(),await changed.text()).toBe(200);
+ expect((await read()).map((trade:{date:string})=>trade.date)).toEqual(['2026-10-05','2026-10-06']);
+ await page.getByRole('button',{name:'Refresh calendar'}).click();
+ await expect(page.getByRole('button',{name:/October 6, 2026.*-\$40\.00/})).toHaveClass(/calendar-day loss/);
+ expect((await outsider.get(`/api/calendar?accountId=${account.id}&month=2026-10`)).status()).toBe(404);
+ expect((await owner.delete(`/api/trades/${first.id}?version=${first.version}`)).status()).toBe(200);
+ expect((await read()).map((trade:{id:string})=>trade.id)).toEqual([second.id]);
+ await page.getByRole('button',{name:'Refresh calendar'}).click();
+ await expect(page.getByRole('button',{name:/October 5, 2026/})).toHaveCount(0);
+ expect((await owner.patch('/api/preferences',{data:{theme:'dark',accountId}})).status()).toBe(200);
+ expect((await owner.delete(`/api/accounts/${account.id}`)).status()).toBe(200);
+});
 test('review submission, moderation and public publication remain ownership-scoped',async({request})=>{
  const own=await owner.post('/api/reviews',{data:{reviewText:'Owner review must remain pending.'}});expect(own.status(),await own.text()).toBe(201);
  const ownReview=await own.json();expect(ownReview.status).toBe('pending');
@@ -113,7 +176,7 @@ test('login, import parity, journal filters, editing, saving and deletion throug
  await page.reload();await page.getByRole('button',{name:'Saved scenarios',exact:true}).click();await page.getByRole('button',{name:/^Verified bankroll/}).click();await expect(page.getByLabel('Cost per account ($)')).toHaveValue('30');await expect(page.getByText('$90.00',{exact:true})).toBeVisible();
  expect(errors).toEqual([]);await page.getByRole('button',{name:'Log out'}).click();await expect(page).toHaveURL(base+'/');await page.goto('/journal');await expect(page).toHaveURL(/login/);
  await page.getByLabel('Email address').fill(credentials.email);await page.getByLabel('Password',{exact:true}).fill(credentials.password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page).toHaveURL(/dashboard/);await expect(page.getByText('$6,352.00',{exact:true})).toBeVisible();
- for(const path of ['/statistics','/review','/settings']){await page.goto(path);await expect(page.locator('main#main')).toBeVisible();}
+ for(const path of ['/statistics','/calendar','/review','/settings']){await page.goto(path);await expect(page.locator('main#main')).toBeVisible();}
  expect(errors).toEqual([]);
 });
 test('responsive themes, navigation and accessibility',async({page})=>{

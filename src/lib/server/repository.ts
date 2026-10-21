@@ -1,6 +1,7 @@
 import {supabaseServer} from '../supabase/server';
 import {HttpError} from './http';
 import {calculateAnalytics} from '../analytics/journal';
+import {calendarMonthBounds} from '../analytics/calendar';
 import {accountSchema,tradeSchema,scenarioSchema,reviewSubmissionSchema,reviewModerationSchema} from '../validation/schemas';
 import type {Trade,TradingAccount} from '@/types/trading';
 import type {Json} from '../supabase/types';
@@ -108,6 +109,21 @@ export async function listTrades(userId:string,params:URLSearchParams){
   if(!exporting||(data?.length||0)<500)break;
  }
  return {trades:records,total,page,pageSize:exporting?50000:20};
+}
+export async function listCalendarTrades(userId:string,accountId:string,month:string):Promise<Trade[]> {
+ const account=await ownedAccount(userId,accountId);
+ const bounds=calendarMonthBounds(month);
+ if(!bounds)throw new HttpError(422,'Choose a valid calendar month.');
+ const db=await supabaseServer(),records:Trade[]=[];
+ for(let offset=0;;offset+=500){
+  const {data,error}=await db.from('trade_records').select('*')
+   .eq('user_id',userId).eq('accountId',account.id)
+   .gte('date',bounds.start).lt('date',bounds.end)
+   .order('date').order('sequence').range(offset,offset+499);
+  check(error);records.push(...(data||[]).map(tradeDto));
+  if((data?.length||0)<500)break;
+ }
+ return records;
 }
 export async function saveTrade(userId:string,raw:unknown,id?:string){
  const data=tradeSchema.parse(raw);await ownedAccount(userId,data.accountId);
