@@ -28,7 +28,7 @@ const previews={
 } satisfies Record<string,PreviewImage>;
 
 function reviewDate(value:string,language:'en'|'es'){
- return new Intl.DateTimeFormat(language==='es'?'es-MX':'en-US',{month:'short',year:'numeric'}).format(new Date(value));
+ return new Intl.DateTimeFormat(language==='es'?'es-MX':'en-US',{month:'short',year:'numeric',timeZone:'UTC'}).format(new Date(value));
 }
 
 export function LandingPage({reviews}:{reviews:ReviewSubmission[]}){

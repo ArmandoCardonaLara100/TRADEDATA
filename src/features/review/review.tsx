@@ -15,7 +15,7 @@ const statusKey:Record<ReviewSubmission['status'],MessageKey>={
 };
 
 function reviewDate(value:string,language:'en'|'es') {
-  return new Intl.DateTimeFormat(language==='es'?'es-MX':'en-US',{month:'short',day:'numeric',year:'numeric'}).format(new Date(value));
+  return new Intl.DateTimeFormat(language==='es'?'es-MX':'en-US',{month:'short',day:'numeric',year:'numeric',timeZone:'UTC'}).format(new Date(value));
 }
 
 export function Review({initial,viewerId}:{initial:ReviewWorkspace;viewerId:string}) {
