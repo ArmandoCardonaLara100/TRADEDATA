@@ -10,7 +10,9 @@ export const tradeSchema=z.object({
  duration:z.preprocess(v=>v===''||v===undefined?null:v,z.coerce.number().min(0).max(1e7).nullable()),
  pnl:nullableDecimal(-1e12,1e12),notes:optionalText(10000),feelings:optionalText(5000),
  evidenceUrl:z.union([z.literal(''),z.url().refine(v=>new URL(v).protocol==='https:','Use an HTTPS link.')]).default(''),
- strategy:optionalText(80),direction:z.enum(['long','short','']).default(''),session:optionalText(40),tags:optionalText(250),version:z.number().int().positive().optional(),
+ strategy:optionalText(80),setupGrade:z.enum(['','A+','A','B+','B']).default(''),
+ mindset:z.enum(['','euphoria','trust','neutral','fear','fomo','anxiety']).default(''),
+ direction:z.enum(['long','short','']).default(''),session:optionalText(40),tags:optionalText(250),version:z.number().int().positive().optional(),
 });
 export const simulationSchema=z.object({winProbability:z.number().min(0).max(1),rewardRisk:z.number().positive().max(100),riskPercent:z.number().min(.000001).max(1),target:z.number().positive().max(10),maxDrawdown:z.number().positive().max(1),accounts:z.number().int().min(1).max(1000),trades:z.number().int().min(1).max(2000),trailing:z.boolean(),seed:z.number().int().min(0).max(4294967295),initialBalance:z.number().positive().max(1e12)});
 export const bankrollSchema=z.object({accountSize:z.number().positive().max(1e12),accounts:z.number().int().min(0).max(100000),accountCost:z.number().min(0).max(1e9),withdrawals:z.number().int().min(0).max(10000),withdrawalAmount:z.number().min(0).max(1e9),passRate:z.number().min(0).max(1)});

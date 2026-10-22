@@ -7,6 +7,7 @@ import type {Trade,TradingAccount} from '@/types/trading';
 import type {Json} from '../supabase/types';
 import type {parseWorkbook} from '../import/workbook';
 import type {ReviewSubmission,ReviewWorkspace,ReviewStatus} from '@/types/reviews';
+import {EVIDENCE_BUCKET} from '../evidence';
 
 type DbError={code:string;message:string;details?:string};
 export function check(error:DbError|null) {
@@ -74,12 +75,15 @@ export async function updateAccount(userId:string,id:string,raw:unknown){
  check(error);if(!row)throw new HttpError(404,'Trading account not found.');return ownedAccount(userId,id);
 }
 export async function removeAccount(userId:string,id:string){
- const db=await supabaseServer();const {data,error}=await db.from('trading_accounts').delete().eq('id',id).eq('user_id',userId).select('id');
+ const db=await supabaseServer();const paths:string[]=[];
+ for(let offset=0;;offset+=500){const r=await db.from('trades').select('evidencePath').eq('accountId',id).eq('user_id',userId).neq('evidencePath','').range(offset,offset+499);check(r.error);paths.push(...(r.data||[]).map(t=>t.evidencePath));if((r.data?.length||0)<500)break;}
+ const {data,error}=await db.from('trading_accounts').delete().eq('id',id).eq('user_id',userId).select('id');
  check(error);if(!data?.length)throw new HttpError(404,'Trading account not found.');
+ for(let offset=0;offset<paths.length;offset+=100)await db.storage.from(EVIDENCE_BUCKET).remove(paths.slice(offset,offset+100));
 }
 export async function listTrades(userId:string,params:URLSearchParams){
  const account=await ownedAccount(userId,params.get('accountId')||''),db=await supabaseServer();
- const page=Math.min(100000,Math.max(1,Math.floor(Number(params.get('page'))||1))),exporting=params.get('export')==='1';
+ const page=Math.min(100000,Math.max(1,Math.floor(Number(params.get('page'))||1))),exporting=params.get('export')==='1',reporting=params.get('report')==='1';
  // Filter/sort monetary values on the numeric base table; return precision-safe
  // records from the view after selecting IDs.
  const search=(params.get('search')||'').slice(0,200).replace(/[\\%_]/g,'\\$&').replace(/"/g,'\\"');
@@ -100,6 +104,7 @@ export async function listTrades(userId:string,params:URLSearchParams){
  for(let offset=exporting?0:(page-1)*20;;offset+=500){
   const size=exporting?500:20,{data,error,count}=await query().range(offset,offset+size-1);
   check(error);total=count||0;
+  if(reporting&&total>5000)throw new HttpError(422,'The PDF report supports up to 5,000 operations. Export CSV for larger histories.');
   if(exporting&&total>50000)throw new HttpError(422,'Filter your export to 50,000 operations or fewer.');
   if(data?.length){
    const rows=await db.from('trade_records').select('*').in('id',data.map(r=>r.id));check(rows.error);
@@ -132,8 +137,9 @@ export async function saveTrade(userId:string,raw:unknown,id?:string){
  check(result.error);return tradeDto(result.data);
 }
 export async function removeTrade(userId:string,id:string,version:number){
- const db=await supabaseServer(),{data,error}=await db.from('trades').delete().eq('user_id',userId).eq('id',id).eq('version',version).select('id');
+ const db=await supabaseServer(),{data,error}=await db.from('trades').delete().eq('user_id',userId).eq('id',id).eq('version',version).select('id,evidencePath');
  check(error);if(!data?.length)throw new HttpError(409,'This operation changed or was removed. Refresh and try again.');
+ if(data[0].evidencePath)await db.storage.from(EVIDENCE_BUCKET).remove([data[0].evidencePath]);
 }
 export async function saveScenario(userId:string,raw:unknown){
  const data=scenarioSchema.parse(raw),db=await supabaseServer();

@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.5"
+    PostgrestVersion: "14.17"
   }
   public: {
     Tables: {
@@ -153,15 +153,18 @@ export type Database = {
           date: string | null
           direction: string
           duration: number | null
+          evidencePath: string
           evidenceUrl: string
           feelings: string
           id: string
+          mindset: string
           notes: string
           pnl: number | null
           rewardRisk: number | null
           riskPercent: number | null
           sequence: number
           session: string
+          setupGrade: string
           sourceRow: number | null
           strategy: string
           symbol: string
@@ -176,15 +179,18 @@ export type Database = {
           date?: string | null
           direction?: string
           duration?: number | null
+          evidencePath?: string
           evidenceUrl?: string
           feelings?: string
           id?: string
+          mindset?: string
           notes?: string
           pnl?: number | null
           rewardRisk?: number | null
           riskPercent?: number | null
           sequence: number
           session?: string
+          setupGrade?: string
           sourceRow?: number | null
           strategy?: string
           symbol?: string
@@ -199,15 +205,18 @@ export type Database = {
           date?: string | null
           direction?: string
           duration?: number | null
+          evidencePath?: string
           evidenceUrl?: string
           feelings?: string
           id?: string
+          mindset?: string
           notes?: string
           pnl?: number | null
           rewardRisk?: number | null
           riskPercent?: number | null
           sequence?: number
           session?: string
+          setupGrade?: string
           sourceRow?: number | null
           strategy?: string
           symbol?: string
@@ -349,15 +358,18 @@ export type Database = {
           date: string | null
           direction: string | null
           duration: number | null
+          evidencePath: string | null
           evidenceUrl: string | null
           feelings: string | null
           id: string | null
+          mindset: string | null
           notes: string | null
           pnl: string | null
           rewardRisk: string | null
           riskPercent: string | null
           sequence: number | null
           session: string | null
+          setupGrade: string | null
           sourceRow: number | null
           strategy: string | null
           symbol: string | null
@@ -370,15 +382,18 @@ export type Database = {
           date?: string | null
           direction?: string | null
           duration?: number | null
+          evidencePath?: string | null
           evidenceUrl?: string | null
           feelings?: string | null
           id?: string | null
+          mindset?: string | null
           notes?: string | null
           pnl?: never
           rewardRisk?: never
           riskPercent?: never
           sequence?: number | null
           session?: string | null
+          setupGrade?: string | null
           sourceRow?: number | null
           strategy?: string | null
           symbol?: string | null
@@ -391,15 +406,18 @@ export type Database = {
           date?: string | null
           direction?: string | null
           duration?: number | null
+          evidencePath?: string | null
           evidenceUrl?: string | null
           feelings?: string | null
           id?: string | null
+          mindset?: string | null
           notes?: string | null
           pnl?: never
           rewardRisk?: never
           riskPercent?: never
           sequence?: number | null
           session?: string | null
+          setupGrade?: string | null
           sourceRow?: number | null
           strategy?: string | null
           symbol?: string | null

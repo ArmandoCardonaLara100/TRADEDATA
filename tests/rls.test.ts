@@ -8,6 +8,13 @@ let accountId:string;
 beforeAll(async()=>{
  await db.exec(`create role anon; create role authenticated;
  create schema auth; create table auth.users(id uuid primary key);
+ create schema storage;
+ create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);
+ create table storage.objects(bucket_id text,name text,primary key(bucket_id,name));
+ alter table storage.objects enable row level security;
+ create function storage.foldername(path text) returns text[] language sql immutable as $$select string_to_array(regexp_replace(path,'/[^/]*$',''),'/')$$;
+ grant usage on schema storage to authenticated;
+ grant select,insert,delete on storage.objects to authenticated;
  create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
  grant usage on schema auth,public to authenticated,anon;
  grant execute on function auth.uid() to authenticated,anon;
@@ -52,6 +59,29 @@ test('trade updates reject stale versions and return precise money',async()=>{
   const updated=await db.query<{save_trade:{version:number}}>('select save_trade($1::jsonb,$2)',[JSON.stringify({accountId,pnl:'123.45',version:1}),row.id]);
   expect(updated.rows[0].save_trade.version).toBe(2);
   await expect(db.query('select save_trade($1::jsonb,$2)',[JSON.stringify({accountId,pnl:'100',version:1}),row.id])).rejects.toMatchObject({code:'PT409'});
+ });
+});
+test('grade, mindset, note, and edited Trade Date persist through the view and RPC',async()=>{
+ await asUser(a,async()=>{
+  const created=await db.query<{save_trade:{id:string;version:number;date:string;setupGrade:string;mindset:string;feelings:string}}>('select save_trade($1::jsonb)',[JSON.stringify({accountId,date:'2026-10-21',setupGrade:'A+',mindset:'fear',feelings:'Entered too early'})]);
+  const row=created.rows[0].save_trade;
+  expect(row).toMatchObject({date:'2026-10-21',setupGrade:'A+',mindset:'fear',feelings:'Entered too early'});
+  const updated=await db.query<{save_trade:{date:string;setupGrade:string;mindset:string}}>('select save_trade($1::jsonb,$2)',[JSON.stringify({accountId,date:'2026-10-18',setupGrade:'B+',mindset:'neutral',feelings:'Waited for confirmation',version:row.version}),row.id]);
+  expect(updated.rows[0].save_trade).toMatchObject({date:'2026-10-18',setupGrade:'B+',mindset:'neutral'});
+  expect((await db.query<{date:string}>('select date::text as date from trade_records where id=$1',[row.id])).rows[0].date).toBe('2026-10-18');
+ });
+});
+test('private evidence objects are readable and writable only for the owning trade user',async()=>{
+ let path:string;
+ await asUser(a,async()=>{
+  const r=await db.query<{id:string}>('select id from trades where "accountId"=$1 limit 1',[accountId]);
+  path=`${a}/${r.rows[0].id}/sample.png`;
+  await db.query('insert into storage.objects(bucket_id,name) values($1,$2)',['trade-evidence',path]);
+  expect((await db.query('select name from storage.objects')).rows).toHaveLength(1);
+ });
+ await asUser(b,async()=>{
+  expect((await db.query('select name from storage.objects')).rows).toHaveLength(0);
+  await expect(db.query('insert into storage.objects(bucket_id,name) values($1,$2)',['trade-evidence',path])).rejects.toThrow(/row-level security/);
  });
 });
 test('deleting a trading account cascades trades without deleting the auth user',async()=>{
