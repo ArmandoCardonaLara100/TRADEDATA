@@ -35,6 +35,10 @@ export function TradeDialog({open,onOpenChange,trade,onSaved}:{open:boolean;onOp
   const data=Object.fromEntries(new FormData(e.currentTarget));
   try{
    data.evidenceUrl=String(data.evidenceUrl||'').trim();
+   // Direction and tags remain available on historical operations, but the
+   // editor reference intentionally removes them from this form.
+   data.direction=trade?.direction||'';
+   data.tags=trade?.tags||'';
    const risk=data.riskPercent?new D(String(data.riskPercent)).div(100).toString():null;
    const additionalEvidenceUrls=[2,3,4].map(index=>String(data[`evidenceLink${index}`]||'').trim());
    for(const index of [2,3,4])delete data[`evidenceLink${index}`];
@@ -65,12 +69,10 @@ export function TradeDialog({open,onOpenChange,trade,onSaved}:{open:boolean;onOp
    </div>
    <details className="form-details" open={!!(trade?.notes||trade?.strategy||trade?.mindset||trade?.evidencePath)}>
     <summary>{t('journal.context')}</summary>
-    <div className="form-grid">
-     <Field label={t('journal.direction')}><select name="direction" defaultValue={trade?.direction||''}><option value="">{t('journal.unspecified')}</option><option value="long">Long</option><option value="short">Short</option></select></Field>
+    <div className="form-grid context-grid">
      <Field label={t('journal.strategy')}><input name="strategy" maxLength={80} defaultValue={trade?.strategy||''} placeholder={t('journal.strategyPlaceholder')}/></Field>
      <Field label={t('journal.grade')}><select name="setupGrade" defaultValue={trade?.setupGrade||''}><option value="">{t('journal.unspecified')}</option>{['A+','A','B+','B'].map(grade=><option key={grade} value={grade}>{grade}</option>)}</select></Field>
      <Field label={t('journal.session')}><select name="session" defaultValue={trade?.session||''}><option value="">{t('journal.unspecified')}</option>{['Asia','London','New York','Other'].map(x=><option key={x}>{x}</option>)}</select></Field>
-     <Field label={t('journal.tags')}><input name="tags" maxLength={250} placeholder="Trend, liquidity, reversal" defaultValue={trade?.tags||''}/></Field>
     </div>
     <Field label={t('journal.analysis')}><textarea name="notes" rows={3} maxLength={10000} placeholder={t('journal.analysisPlaceholder')} defaultValue={trade?.notes||''}/></Field>
     <Field label={t('journal.mindset')}><select name="mindset" defaultValue={trade?.mindset||''}><option value="">{t('journal.unspecified')}</option>{mindsetValues.map(value=><option key={value} value={value}>{t(`journal.mindset.${value}`)}</option>)}</select></Field>

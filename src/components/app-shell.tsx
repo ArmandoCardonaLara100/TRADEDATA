@@ -1,5 +1,6 @@
 'use client';
 import Link from 'next/link';
+import Image from 'next/image';
 import {usePathname} from 'next/navigation';
 import {useState} from 'react';
 import {LayoutDashboard,BookOpen,ChartNoAxesCombined,CalendarDays,MessageSquareQuote,Shuffle,Landmark,Settings,Menu,ChevronDown,Plus,LogOut,Upload,Check,X,ArrowUpRight,LoaderCircle,Trash2} from 'lucide-react';
@@ -13,7 +14,7 @@ import {useLanguage,type MessageKey} from '@/lib/i18n';
 import {LanguageSelect,ThemeSelect} from './preference-controls';
 import {DeleteAccountDialog} from '@/features/workspace/delete-account-dialog';
 const navigation=[{href:'/dashboard',label:'app.overview',icon:LayoutDashboard},{href:'/journal',label:'app.journal',icon:BookOpen},{href:'/statistics',label:'app.statistics',icon:ChartNoAxesCombined},{href:'/calendar',label:'app.calendar',icon:CalendarDays},{href:'/monte-carlo',label:'app.monteCarlo',icon:Shuffle},{href:'/funded-accounts',label:'app.funded',icon:Landmark},{href:'/review',label:'app.review',icon:MessageSquareQuote}] as const;
-export function Brand({compact=false}:{compact?:boolean}){return <div className={`brand${compact?' compact':''}`}><span className="brand-mark" aria-hidden="true"><ChartNoAxesCombined size={22} strokeWidth={2.4}/></span><span>TRADE<span className="brand-light">DATA</span></span></div>;}
+export function Brand({compact=false}:{compact?:boolean}){return <div className={`brand${compact?' compact':''}`}><Image className="brand-logo" src="/logo.png" width={32} height={32} alt=""/><span>TRADE<span className="brand-light">DATA</span></span></div>;}
 export function AppShell({children,user}:{children:React.ReactNode;user:{name:string;email:string}}){
  const pathname=usePathname(),{t}=useLanguage();const {accounts,account,select,loading,error,notice,notify}=useWorkspace();
  const [menu,setMenu]=useState(false),[newAccount,setNewAccount]=useState(false),[importOpen,setImportOpen]=useState(false),[deleteOpen,setDeleteOpen]=useState(false),[logoutError,setLogoutError]=useState(''),[logoutBusy,setLogoutBusy]=useState(false);

@@ -1,9 +1,10 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import {useRouter} from 'next/navigation';
 import {useState, type FormEvent} from 'react';
-import {ArrowLeft, ArrowRight, ChartNoAxesCombined, Eye, EyeOff, ShieldCheck} from 'lucide-react';
+import {ArrowLeft, ArrowRight, Eye, EyeOff, ShieldCheck} from 'lucide-react';
 
 import {Button, ErrorMessage, Field} from '@/components/ui';
 import {authClient} from '@/lib/auth-client';
@@ -69,7 +70,7 @@ export function AuthForm({register = false, initialErrorKey}: {register?: boolea
 
   return <div className="auth-page">
     <div className="auth-aside">
-      <Link className="brand" href="/"><span className="brand-mark"><ChartNoAxesCombined size={23}/></span><span>TRADE<span className="brand-light">DATA</span></span></Link>
+      <Link className="brand" href="/"><Image className="brand-logo" src="/logo.png" width={32} height={32} alt=""/><span>TRADE<span className="brand-light">DATA</span></span></Link>
       <div className="auth-statement">
         <span className="eyebrow">{t('auth.tagline')}</span>
         <h1>{t('auth.statement')}</h1>

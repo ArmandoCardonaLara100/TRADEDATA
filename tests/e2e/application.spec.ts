@@ -213,6 +213,8 @@ test('login, import parity, journal filters, editing, saving and deletion throug
  await page.getByLabel('Trade date').fill('2026-10-17');await page.getByLabel('Instrument',{exact:true}).fill('QA/USD');await page.getByLabel('Net result (USD)').fill('125');await page.getByLabel('Risk per trade (%)').fill('1');await page.getByLabel('Planned reward / risk (R)').fill('2');
  await page.getByLabel('Setup grade').selectOption('A+');await page.getByLabel('Mindset & execution').selectOption('fear');await page.getByLabel('Mindset note (optional)').fill('Waited for the setup.');
  await expect(page.getByLabel('Strategy / setup')).toHaveCount(1);
+ await expect(page.getByLabel('Direction')).toHaveCount(0);
+ await expect(page.getByLabel('Tags')).toHaveCount(0);
  await page.getByLabel('Strategy / setup').fill('Breakout');
  await page.getByLabel('Evidence link 1').fill('https://example.com/one');
  await page.getByLabel('Evidence link 2').fill('https://example.com/two');
