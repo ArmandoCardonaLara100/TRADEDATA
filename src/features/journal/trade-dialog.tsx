@@ -34,8 +34,11 @@ export function TradeDialog({open,onOpenChange,trade,onSaved}:{open:boolean;onOp
   e.preventDefault();if(!account)return;setBusy(true);setError('');
   const data=Object.fromEntries(new FormData(e.currentTarget));
   try{
+   data.evidenceUrl=String(data.evidenceUrl||'').trim();
    const risk=data.riskPercent?new D(String(data.riskPercent)).div(100).toString():null;
-   const saved=await api<Trade>(trade?`/api/trades/${trade.id}`:'/api/trades',{method:trade?'PATCH':'POST',body:JSON.stringify({...data,accountId:account.id,riskPercent:risk,version:trade?.version})});
+   const additionalEvidenceUrls=[2,3,4].map(index=>String(data[`evidenceLink${index}`]||'').trim());
+   for(const index of [2,3,4])delete data[`evidenceLink${index}`];
+   const saved=await api<Trade>(trade?`/api/trades/${trade.id}`:'/api/trades',{method:trade?'PATCH':'POST',body:JSON.stringify({...data,additionalEvidenceUrls,accountId:account.id,riskPercent:risk,version:trade?.version})});
    let imageError=false;
    if(image){
     const form=new FormData();form.set('image',image);
@@ -68,9 +71,9 @@ export function TradeDialog({open,onOpenChange,trade,onSaved}:{open:boolean;onOp
      <Field label={t('journal.grade')}><select name="setupGrade" defaultValue={trade?.setupGrade||''}><option value="">{t('journal.unspecified')}</option>{['A+','A','B+','B'].map(grade=><option key={grade} value={grade}>{grade}</option>)}</select></Field>
      <Field label={t('journal.session')}><select name="session" defaultValue={trade?.session||''}><option value="">{t('journal.unspecified')}</option>{['Asia','London','New York','Other'].map(x=><option key={x}>{x}</option>)}</select></Field>
      <Field label={t('journal.tags')}><input name="tags" maxLength={250} placeholder="Trend, liquidity, reversal" defaultValue={trade?.tags||''}/></Field>
-     <Field label={t('journal.mindset')}><select name="mindset" defaultValue={trade?.mindset||''}><option value="">{t('journal.unspecified')}</option>{mindsetValues.map(value=><option key={value} value={value}>{t(`journal.mindset.${value}`)}</option>)}</select></Field>
     </div>
     <Field label={t('journal.analysis')}><textarea name="notes" rows={3} maxLength={10000} placeholder={t('journal.analysisPlaceholder')} defaultValue={trade?.notes||''}/></Field>
+    <Field label={t('journal.mindset')}><select name="mindset" defaultValue={trade?.mindset||''}><option value="">{t('journal.unspecified')}</option>{mindsetValues.map(value=><option key={value} value={value}>{t(`journal.mindset.${value}`)}</option>)}</select></Field>
     <Field label={t('journal.mindsetNote')}><textarea name="feelings" rows={3} maxLength={5000} placeholder={t('journal.mindsetPlaceholder')} defaultValue={trade?.feelings||''}/></Field>
     <div className="evidence-field"><span className="field-title">{t('journal.evidenceImage')}</span>
      <div className="evidence-dropzone" tabIndex={0} onPaste={pasteImage} aria-label={t('journal.evidencePaste')}>
@@ -80,7 +83,7 @@ export function TradeDialog({open,onOpenChange,trade,onSaved}:{open:boolean;onOp
      {(preview||showingStored)&&<div className="evidence-preview"><img src={preview||`/api/trades/${trade!.id}/evidence`} alt={t('journal.evidencePreview')}/><Button type="button" variant="ghost" onClick={()=>{setImage(null);setRemoveImage(true);}}>{t('journal.removeImage')}</Button></div>}
      <small>{t('journal.evidenceHint')}</small>
     </div>
-    <Field label={t('journal.evidenceLink')} hint={t('journal.evidenceLinkHint')}><input name="evidenceUrl" type="url" placeholder="https://www.tradingview.com/x/…" defaultValue={trade?.evidenceUrl||''}/></Field>
+    {[1,2,3,4].map(index=><Field key={index} label={`${t('journal.evidenceLink')} ${index}`} hint={index===1?t('journal.evidenceLinkHint'):undefined}><input name={index===1?'evidenceUrl':`evidenceLink${index}`} type="url" maxLength={2048} placeholder="https://www.tradingview.com/x/…" defaultValue={index===1?trade?.evidenceUrl||'':trade?.additionalEvidenceUrls?.[index-2]||''}/></Field>)}
    </details>
    <div className="dialog-actions"><Button type="button" variant="secondary" onClick={()=>onOpenChange(false)}>{t('app.cancel')}</Button><Button loading={busy}>{trade?t('journal.saveChanges'):t('action.record')}</Button></div>
   </form>
@@ -96,7 +99,7 @@ export function TradeDetails({trade,onClose,onChanged}:{trade:Trade|null;onClose
   <dl className="details-grid">{[[t('journal.riskPercent'),trade.riskPercent?`${number(Number(trade.riskPercent)*100)}%`:'—'],[t('journal.plannedR'),trade.rewardRisk?`${number(Number(trade.rewardRisk))}R`:'—'],[t('journal.duration'),trade.duration===null?'—':`${number(trade.duration)} min`],[t('journal.strategy'),trade.strategy||'—'],[t('journal.grade'),trade.setupGrade||'—'],[t('journal.mindset'),trade.mindset?t(`journal.mindset.${trade.mindset}`):'—'],[t('journal.direction'),trade.direction||'—'],[t('journal.session'),trade.session||'—']].map(([k,v])=><div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
   {trade.notes&&<div className="detail-notes"><h3>{t('journal.analysis')}</h3><p>{trade.notes}</p></div>}{trade.feelings&&<div className="detail-notes"><h3>{t('journal.mindsetNote')}</h3><p>{trade.feelings}</p></div>}{trade.tags&&<p className="muted">{t('journal.tags')}: {trade.tags}</p>}
   {trade.evidencePath&&<div className="evidence-preview"><img src={`/api/trades/${trade.id}/evidence`} alt={t('journal.evidencePreview')}/></div>}
-  {trade.evidenceUrl&&<a href={trade.evidenceUrl} target="_blank" rel="noopener noreferrer" className="text-link">{t('journal.openEvidence')}<ExternalLink size={15}/></a>}
+  {[trade.evidenceUrl,...(trade.additionalEvidenceUrls||[])].map((url,index)=>url&&<a key={index} href={url} target="_blank" rel="noopener noreferrer" className="text-link">{t('journal.openEvidence')} {index+1}<ExternalLink size={15}/></a>)}
   {trade.sourceRow&&<p className="source-caption">Imported from {account.sourceSheet}, row {trade.sourceRow}. Operation order is preserved.</p>}
   <div className="dialog-actions spread"><Button variant="ghost" onClick={()=>setDeleting(true)}><Trash2 size={15}/>{t('journal.delete')}</Button><Button onClick={()=>setEditing(true)}><Pencil size={15}/>{t('journal.edit')}</Button></div>
  </Modal><TradeDialog key={`${trade.id}-${trade.version}`} open={editing} onOpenChange={setEditing} trade={trade} onSaved={async()=>{await onChanged?.();onClose();}}/><Modal open={deleting} onOpenChange={setDeleting} title={t('journal.deleteTitle')} description={t('journal.deleteDescription').replace('{number}',String(trade.sequence))}><ErrorMessage error={error}/><div className="dialog-actions"><Button variant="secondary" onClick={()=>setDeleting(false)}>{t('journal.keep')}</Button><Button variant="danger" loading={busy} onClick={remove}>{t('journal.delete')}</Button></div></Modal></>;

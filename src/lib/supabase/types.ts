@@ -149,6 +149,7 @@ export type Database = {
       trades: {
         Row: {
           accountId: string
+          additionalEvidenceUrls: string[]
           created_at: string
           date: string | null
           direction: string
@@ -175,6 +176,7 @@ export type Database = {
         }
         Insert: {
           accountId: string
+          additionalEvidenceUrls?: string[]
           created_at?: string
           date?: string | null
           direction?: string
@@ -201,6 +203,7 @@ export type Database = {
         }
         Update: {
           accountId?: string
+          additionalEvidenceUrls?: string[]
           created_at?: string
           date?: string | null
           direction?: string
@@ -355,6 +358,7 @@ export type Database = {
       trade_records: {
         Row: {
           accountId: string | null
+          additionalEvidenceUrls: string[] | null
           date: string | null
           direction: string | null
           duration: number | null
@@ -379,6 +383,7 @@ export type Database = {
         }
         Insert: {
           accountId?: string | null
+          additionalEvidenceUrls?: string[] | null
           date?: string | null
           direction?: string | null
           duration?: number | null
@@ -403,6 +408,7 @@ export type Database = {
         }
         Update: {
           accountId?: string | null
+          additionalEvidenceUrls?: string[] | null
           date?: string | null
           direction?: string | null
           duration?: number | null

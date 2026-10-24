@@ -2,6 +2,7 @@ import { z } from 'zod';
 const decimal = (min:number,max:number)=>z.union([z.string().trim().min(1).regex(/^-?\d+(\.\d{1,8})?$/,'Use a number with up to 8 decimal places.'),z.number().finite()]).transform(String).refine(v=>Number.isFinite(Number(v))&&Number(v)>=min&&Number(v)<=max,`Must be between ${min} and ${max}.`);
 const nullableDecimal=(min:number,max:number)=>z.preprocess(v=>v===''||v===undefined?null:v,decimal(min,max).nullable());
 const optionalText=(max:number)=>z.string().trim().max(max).default('');
+const evidenceLink=z.union([z.literal(''),z.url().max(2048).refine(v=>['https:','http:'].includes(new URL(v).protocol),'Use an HTTP or HTTPS link.')]);
 export const accountSchema=z.object({name:z.string().trim().min(1).max(80),currency:z.enum(['USD','EUR','GBP','MXN']).default('USD'),initialBalance:decimal(0.01,1e12),breakEvenBand:decimal(0,1e9).default('15')});
 export const tradeSchema=z.object({
  accountId:z.string().uuid(),sequence:z.number().int().min(1).max(1e7).optional(),
@@ -9,7 +10,7 @@ export const tradeSchema=z.object({
  symbol:optionalText(30),riskPercent:nullableDecimal(0,1),rewardRisk:nullableDecimal(0,1000),
  duration:z.preprocess(v=>v===''||v===undefined?null:v,z.coerce.number().min(0).max(1e7).nullable()),
  pnl:nullableDecimal(-1e12,1e12),notes:optionalText(10000),feelings:optionalText(5000),
- evidenceUrl:z.union([z.literal(''),z.url().refine(v=>new URL(v).protocol==='https:','Use an HTTPS link.')]).default(''),
+ evidenceUrl:evidenceLink.default(''),additionalEvidenceUrls:z.array(evidenceLink).max(3).optional(),
  strategy:optionalText(80),setupGrade:z.enum(['','A+','A','B+','B']).default(''),
  mindset:z.enum(['','euphoria','trust','neutral','fear','fomo','anxiety']).default(''),
  direction:z.enum(['long','short','']).default(''),session:optionalText(40),tags:optionalText(250),version:z.number().int().positive().optional(),

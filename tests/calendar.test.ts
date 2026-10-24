@@ -4,7 +4,7 @@ import type {Trade} from '../src/types/trading';
 
 function trade(sequence:number,date:string|null,pnl:string|null):Trade {
   return {id:String(sequence),accountId:'account',sequence,date,pnl,symbol:'EUR/USD',riskPercent:null,
-    rewardRisk:null,duration:null,notes:'',feelings:'',evidenceUrl:'',evidencePath:'',strategy:'',setupGrade:'',mindset:'',direction:'',session:'',tags:'',sourceRow:null,version:1};
+    rewardRisk:null,duration:null,notes:'',feelings:'',evidenceUrl:'',additionalEvidenceUrls:[],evidencePath:'',strategy:'',setupGrade:'',mindset:'',direction:'',session:'',tags:'',sourceRow:null,version:1};
 }
 
 describe('journal-derived calendar',()=>{

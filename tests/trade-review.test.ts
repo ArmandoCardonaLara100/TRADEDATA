@@ -8,7 +8,7 @@ import type {Trade,TradingAccount} from '../src/types/trading';
 
 const accountId='11111111-1111-4111-8111-111111111111';
 const account:TradingAccount={id:accountId,name:'Account A',currency:'USD',initialBalance:'10000',breakEvenBand:'0',sourceSheet:null,baselineBreakEven:false,riskMetric:'planned',createdAt:'2026-10-01'};
-function trade(sequence:number,date:string,pnl:string):Trade{return {id:String(sequence),accountId,sequence,date,pnl,symbol:'EUR/USD',riskPercent:null,rewardRisk:null,duration:null,notes:'',feelings:'',evidenceUrl:'',evidencePath:'',strategy:'Breakout',setupGrade:'A+',mindset:'fear',direction:'',session:'',tags:'',sourceRow:null,version:1};}
+function trade(sequence:number,date:string,pnl:string):Trade{return {id:String(sequence),accountId,sequence,date,pnl,symbol:'EUR/USD',riskPercent:null,rewardRisk:null,duration:null,notes:'',feelings:'',evidenceUrl:'',additionalEvidenceUrls:[],evidencePath:'',strategy:'Breakout',setupGrade:'A+',mindset:'fear',direction:'',session:'',tags:'',sourceRow:null,version:1};}
 
 describe('trade review additions',()=>{
  it('defaults from local calendar fields without converting through UTC',()=>{
@@ -32,6 +32,15 @@ describe('trade review additions',()=>{
   expect(evidenceExtension('image/jpeg',png)).toBeNull();
   expect(MAX_EVIDENCE_BYTES).toBe(4*1024*1024);
  });
+ it('keeps the original evidence link and three independently validated extra slots',()=>{
+  const links=['https://chart.example/2','', 'http://localhost:3000/evidence/4'];
+  const parsed=tradeSchema.parse({accountId,evidenceUrl:'https://chart.example/1',additionalEvidenceUrls:links});
+  expect(parsed.evidenceUrl).toBe('https://chart.example/1');
+  expect(parsed.additionalEvidenceUrls).toEqual(links);
+  expect(tradeSchema.parse({accountId,evidenceUrl:'https://chart.example/legacy'}).additionalEvidenceUrls).toBeUndefined();
+  expect(tradeSchema.safeParse({accountId,additionalEvidenceUrls:['javascript:alert(1)']}).success).toBe(false);
+  expect(tradeSchema.safeParse({accountId,additionalEvidenceUrls:['','','','https://chart.example/5']}).success).toBe(false);
+ });
  it('generates a real multipage vector PDF with a long journal',async()=>{
   const trades=Array.from({length:80},(_,i)=>trade(i+1,'2026-10-18',String(i%2?'-25':'50')));
   const pdf=await generateReportPdf({account,trades,month:'2026-10',language:'en',generatedAt:new Date('2026-10-21T12:00:00Z')});
@@ -41,6 +50,6 @@ describe('trade review additions',()=>{
  it('generates all four report sections for an empty Spanish account',async()=>{
   const pdf=await generateReportPdf({account,trades:[],month:'2026-10',language:'es'});
   expect(pdf.subarray(0,5).toString()).toBe('%PDF-');
-  expect((pdf.toString('latin1').match(/\/Type \/Page\b/g)||[]).length).toBe(4);
+  expect((pdf.toString('latin1').match(/\/Type \/Page\b/g)||[]).length).toBeGreaterThanOrEqual(5);
  });
 });

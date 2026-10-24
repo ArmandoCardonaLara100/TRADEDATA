@@ -2,12 +2,14 @@ import PDFDocument from 'pdfkit';
 import {aggregateCalendarDays} from '@/lib/analytics/calendar';
 import {calculateAnalytics,classify} from '@/lib/analytics/journal';
 import {money,percent,number,signedMoney} from '@/lib/format';
+import {journalMessages} from '@/lib/journal-messages';
+import {overviewGraphics,statisticsGraphics} from './graphics';
 import type {Trade,TradingAccount} from '@/types/trading';
 
 const blue='#3677F5',ink='#182131',muted='#66748C',line='#DCE4F0',green='#0A8866',red='#C34657';
 const labels={
- en:{overview:'Overview',journal:'Trading Journal',statistics:'Statistics',calendar:'Calendar',generated:'Generated',account:'Trading account',opening:'Opening balance',balance:'Current balance',net:'Net profit / loss',winRate:'Win rate',drawdown:'Maximum drawdown',riskReward:'Risk/Reward',total:'Closed operations',wins:'Wins',losses:'Losses',breakEven:'Break-even',grossProfit:'Gross profit',grossLoss:'Gross loss',profitFactor:'Profit factor',expectancy:'Expectancy per trade',avgWin:'Average winning trade',avgLoss:'Average losing trade',roi:'Return on starting capital',currentDrawdown:'Current drawdown',avgR:'Average R',date:'Trade date',number:'No.',instrument:'Instrument',result:'Net P/L',outcome:'Result',setup:'Setup / grade',noTrades:'No operations recorded for this account.',noDate:'Undated',open:'Open',noMonth:'No dated operations in this month.',note:'Days use the saved Trade Date. Green means positive net P/L; red means negative; neutral means zero.',page:'Page'},
- es:{overview:'Resumen',journal:'Diario de trading',statistics:'Estadísticas',calendar:'Calendario',generated:'Generado',account:'Cuenta de trading',opening:'Saldo inicial',balance:'Saldo actual',net:'Ganancia / pérdida neta',winRate:'Tasa de aciertos',drawdown:'Drawdown máximo',riskReward:'Riesgo/Beneficio',total:'Operaciones cerradas',wins:'Ganadoras',losses:'Perdedoras',breakEven:'Punto de equilibrio',grossProfit:'Ganancia bruta',grossLoss:'Pérdida bruta',profitFactor:'Factor de beneficio',expectancy:'Expectativa por operación',avgWin:'Ganancia media',avgLoss:'Pérdida media',roi:'Retorno sobre capital inicial',currentDrawdown:'Drawdown actual',avgR:'R promedio',date:'Fecha',number:'N.º',instrument:'Instrumento',result:'Resultado neto',outcome:'Estado',setup:'Setup / calificación',noTrades:'No hay operaciones registradas para esta cuenta.',noDate:'Sin fecha',open:'Abierta',noMonth:'No hay operaciones fechadas en este mes.',note:'Los días usan la fecha guardada de la operación. Verde indica resultado positivo; rojo, negativo; neutro, cero.',page:'Página'},
+ en:{overview:'Overview',journal:'Trading Journal',statistics:'Statistics',calendar:'Calendar',generated:'Generated',account:'Trading account',opening:'Opening balance',balance:'Current balance',net:'Net profit / loss',winRate:'Win rate',drawdown:'Maximum drawdown',riskReward:'Risk/Reward',total:'Closed operations',wins:'Wins',losses:'Losses',breakEven:'Break-even',grossProfit:'Gross profit',grossLoss:'Gross loss',profitFactor:'Profit factor',expectancy:'Expectancy per trade',avgWin:'Average winning trade',avgLoss:'Average losing trade',roi:'Return on starting capital',currentDrawdown:'Current drawdown',avgR:'Average R',recovery:'Recovery factor',mindset:'Mindset',date:'Trade date',number:'No.',instrument:'Instrument',result:'Net P/L',outcome:'Result',setup:'Setup / grade',noTrades:'No operations recorded for this account.',noDate:'Undated',open:'Open',noMonth:'No dated operations in this month.',note:'Days use the saved Trade Date. Green means positive net P/L; red means negative; neutral means zero.',page:'Page'},
+ es:{overview:'Resumen',journal:'Diario de trading',statistics:'Estadísticas',calendar:'Calendario',generated:'Generado',account:'Cuenta de trading',opening:'Saldo inicial',balance:'Saldo actual',net:'Ganancia / pérdida neta',winRate:'Tasa de aciertos',drawdown:'Drawdown máximo',riskReward:'Riesgo/Beneficio',total:'Operaciones cerradas',wins:'Ganadoras',losses:'Perdedoras',breakEven:'Punto de equilibrio',grossProfit:'Ganancia bruta',grossLoss:'Pérdida bruta',profitFactor:'Factor de beneficio',expectancy:'Expectativa por operación',avgWin:'Ganancia media',avgLoss:'Pérdida media',roi:'Retorno sobre capital inicial',currentDrawdown:'Drawdown actual',avgR:'R promedio',recovery:'Factor de recuperación',mindset:'Estado emocional',date:'Fecha',number:'N.º',instrument:'Instrumento',result:'Resultado neto',outcome:'Estado',setup:'Setup / calificación',noTrades:'No hay operaciones registradas para esta cuenta.',noDate:'Sin fecha',open:'Abierta',noMonth:'No hay operaciones fechadas en este mes.',note:'Los días usan la fecha guardada de la operación. Verde indica resultado positivo; rojo, negativo; neutro, cero.',page:'Página'},
 } as const;
 export type ReportInput={account:TradingAccount;trades:Trade[];month:string;language:'en'|'es';generatedAt?:Date};
 
@@ -18,13 +20,15 @@ export async function generateReportPdf({account,trades,month,language,generated
  const chunks:Buffer[]=[];doc.on('data',(chunk:Buffer)=>chunks.push(chunk));
  const complete=new Promise<Buffer>((resolve,reject)=>{doc.on('end',()=>resolve(Buffer.concat(chunks)));doc.on('error',reject);});
  const width=doc.page.width-84;
- function header(title:string,index:string){
+ const pageHeaders=new Map<number,{title:string;index:string}>();
+ function header(title:string,index:string){pageHeaders.set(doc.bufferedPageRange().count-1,{title,index});doc.y=165;}
+ function renderHeader(title:string,index:string){
   doc.rect(0,0,doc.page.width,7).fill(blue);
   doc.fillColor(blue).font('Helvetica-Bold').fontSize(11).text('TRADEDATA',42,30);
   doc.fillColor(muted).font('Helvetica').fontSize(9).text(`${t.account}: ${account.name}`,42,49,{width});
   doc.fillColor(ink).font('Helvetica-Bold').fontSize(25).text(title,42,86);
   doc.fillColor(muted).font('Helvetica').fontSize(9).text(`${index} / 04  ·  ${t.generated}: ${new Intl.DateTimeFormat(locale,{dateStyle:'medium'}).format(generatedAt)}`,42,122);
-  doc.moveTo(42,146).lineTo(doc.page.width-42,146).strokeColor(line).stroke();doc.y=165;
+  doc.moveTo(42,146).lineTo(doc.page.width-42,146).strokeColor(line).stroke();
  }
  function section(title:string,index:string){doc.addPage();header(title,index);}
  function metric(label:string,value:string,x:number,y:number,w:number){
@@ -39,7 +43,7 @@ export async function generateReportPdf({account,trades,month,language,generated
  metric(t.winRate,percent(a.winRate*100,1),54+col,253,col);
  metric(t.drawdown,percent(a.maxDrawdown),42,331,col);
  metric(t.riskReward,a.riskReward===null?'—':`${number(a.riskReward,2,2)}R`,54+col,331,col);
- doc.fillColor(muted).font('Helvetica').fontSize(10).text(`${t.total}: ${a.total}  ·  ${t.open}: ${a.open}`,42,420);
+ overviewGraphics(doc,a,language);
 
  // 02 / Journal, with a repeated header on each overflow page.
  section(t.journal,'02');const columns=[42,78,143,228,302,377,553];
@@ -47,16 +51,25 @@ export async function generateReportPdf({account,trades,month,language,generated
  let y=tableHeader(175);
  if(!trades.length)doc.fillColor(muted).font('Helvetica').fontSize(11).text(t.noTrades,48,y+18);
  for(const trade of [...trades].sort((x,z)=>(x.date||'').localeCompare(z.date||'')||x.sequence-z.sequence)){
-  if(y+32>doc.page.height-85){doc.addPage();header(t.journal,'02');y=tableHeader(175);}
+  if(y+45>doc.page.height-85){doc.addPage();header(t.journal,'02');y=tableHeader(175);}
   const result=classify(trade.pnl,account.breakEvenBand);
-  if(Math.floor(y/32)%2===0)doc.rect(42,y,width,31).fill('#FAFBFD');
+  if(Math.floor(y/45)%2===0)doc.rect(42,y,width,44).fill('#FAFBFD');
   const values=[String(trade.sequence),trade.date||t.noDate,trade.symbol||'—',result==='open'?t.open:result==='win'?t.wins:result==='loss'?t.losses:t.breakEven,trade.pnl===null?'—':signedMoney(Number(trade.pnl),account.currency),[trade.strategy,trade.setupGrade].filter(Boolean).join(' / ')||'—'];
   values.forEach((value,i)=>doc.fillColor(i===4&&trade.pnl!==null?(Number(trade.pnl)<0?red:green):ink).font(i===4?'Helvetica-Bold':'Helvetica').fontSize(8).text(value,columns[i]+5,y+9,{width:columns[i+1]-columns[i]-10,ellipsis:true}));
-  doc.moveTo(42,y+31).lineTo(doc.page.width-42,y+31).strokeColor(line).stroke();y+=32;
+  const mindsetKey=`journal.mindset.${trade.mindset}` as keyof typeof journalMessages.en;
+  const context=[trade.mindset?`${t.mindset}: ${journalMessages[language][mindsetKey]||trade.mindset}`:'',trade.feelings||trade.notes||''].filter(Boolean).join('  ·  ');
+  if(context)doc.fillColor(muted).font('Helvetica').fontSize(7).text(context,47,y+28,{width:width-10,ellipsis:true,lineBreak:false});
+  doc.moveTo(42,y+44).lineTo(doc.page.width-42,y+44).strokeColor(line).stroke();y+=45;
  }
 
  // 03 / Statistics, using exactly the analytics values shown in-app.
- section(t.statistics,'03');y=175;
+ section(t.statistics,'03');
+ metric(t.net,signedMoney(a.netProfit,account.currency),42,175,col);
+ metric(t.expectancy,a.expectancy===null?'—':money(a.expectancy,account.currency),54+col,175,col);
+ metric(t.avgR,a.averageR===null?'—':`${number(a.averageR,2,2)}R`,42,253,col);
+ metric(t.recovery,number(a.recoveryFactor),54+col,253,col);
+ statisticsGraphics(doc,a,language);
+ doc.addPage();header(t.statistics,'03');y=175;
  const rows:[string,string][]=[
   [t.total,String(a.total)],[t.wins,String(a.wins)],[t.losses,String(a.losses)],[t.breakEven,String(a.breakEven)],
   [t.winRate,percent(a.winRate*100,1)],[t.grossProfit,money(a.grossProfit,account.currency)],[t.grossLoss,money(a.grossLoss,account.currency)],
@@ -92,6 +105,7 @@ export async function generateReportPdf({account,trades,month,language,generated
  if(!days.size)doc.fillColor(muted).font('Helvetica').fontSize(10).text(t.noMonth,42,top+38+countRows*(cellHeight+gap));
 
  const pageRange=doc.bufferedPageRange();
- for(let i=pageRange.start;i<pageRange.start+pageRange.count;i++){doc.switchToPage(i);doc.moveTo(42,doc.page.height-61).lineTo(doc.page.width-42,doc.page.height-61).strokeColor(line).stroke();doc.fillColor(muted).font('Helvetica').fontSize(8).text(`TRADEDATA  ·  ${t.page} ${i+1} / ${pageRange.count}`,42,doc.page.height-52,{width,align:'right',lineBreak:false});}
+ let currentHeader:{title:string;index:string}|undefined;
+ for(let i=pageRange.start;i<pageRange.start+pageRange.count;i++){doc.switchToPage(i);currentHeader=pageHeaders.get(i)||currentHeader;if(currentHeader)renderHeader(currentHeader.title,currentHeader.index);doc.moveTo(42,doc.page.height-61).lineTo(doc.page.width-42,doc.page.height-61).strokeColor(line).stroke();doc.fillColor(muted).font('Helvetica').fontSize(8).text(`TRADEDATA  ·  ${t.page} ${i+1} / ${pageRange.count}`,42,doc.page.height-52,{width,align:'right',lineBreak:false});}
  doc.end();return complete;
 }

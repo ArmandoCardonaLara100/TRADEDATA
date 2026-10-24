@@ -138,10 +138,11 @@ test('trade date, review fields, private evidence and four-section PDF persist',
  const created=await owner.post('/api/accounts',{data:{name:'Review fields test',initialBalance:'10000'}});
  expect(created.status(),await created.text()).toBe(201);
  const account=await created.json();
- const saved=await owner.post('/api/trades',{data:{accountId:account.id,date:'2026-10-18',symbol:'EUR/USD',pnl:'125',strategy:'Breakout',setupGrade:'A+',mindset:'fear',feelings:'Waited for confirmation.'}});
+ const evidenceLinks=['https://example.com/chart-2','','https://example.com/chart-4'];
+ const saved=await owner.post('/api/trades',{data:{accountId:account.id,date:'2026-10-18',symbol:'EUR/USD',pnl:'125',strategy:'Breakout',setupGrade:'A+',mindset:'fear',feelings:'Waited for confirmation.',evidenceUrl:'https://example.com/chart-1',additionalEvidenceUrls:evidenceLinks}});
  expect(saved.status(),await saved.text()).toBe(201);
  const record=await saved.json();
- expect(record).toMatchObject({date:'2026-10-18',setupGrade:'A+',mindset:'fear',feelings:'Waited for confirmation.'});
+ expect(record).toMatchObject({date:'2026-10-18',setupGrade:'A+',mindset:'fear',feelings:'Waited for confirmation.',evidenceUrl:'https://example.com/chart-1',additionalEvidenceUrls:evidenceLinks});
  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/f2kAAAAASUVORK5CYII=','base64');
  const upload=await owner.post(`/api/trades/${record.id}/evidence`,{multipart:{image:{name:'chart.png',mimeType:'image/png',buffer:png}}});
  expect(upload.status(),await upload.text()).toBe(200);
@@ -149,17 +150,17 @@ test('trade date, review fields, private evidence and four-section PDF persist',
  expect(image.status()).toBe(200);expect(image.headers()['content-type']).toContain('image/png');expect(await image.body()).toEqual(png);
  expect((await outsider.get(`/api/trades/${record.id}/evidence`)).status()).toBe(404);
  const stored=await (await owner.get(`/api/trades?accountId=${account.id}`)).json();
- expect(stored.trades[0]).toMatchObject({date:'2026-10-18',setupGrade:'A+',mindset:'fear',feelings:'Waited for confirmation.'});
+ expect(stored.trades[0]).toMatchObject({date:'2026-10-18',setupGrade:'A+',mindset:'fear',feelings:'Waited for confirmation.',evidenceUrl:'https://example.com/chart-1',additionalEvidenceUrls:evidenceLinks});
  expect(stored.trades[0].evidencePath).toContain(`${testUserIds[0]}/${record.id}/`);
  const calendar=await (await owner.get(`/api/calendar?accountId=${account.id}&month=2026-10`)).json();
  expect(calendar.trades[0].date).toBe('2026-10-18');
  const report=await owner.get(`/api/report?accountId=${account.id}&month=2026-10&lang=en`);
  expect(report.status(),await report.text()).toBe(200);expect(report.headers()['content-type']).toContain('application/pdf');
  const pdf=await report.body();expect(pdf.subarray(0,5).toString()).toBe('%PDF-');
- expect((pdf.toString('latin1').match(/\/Type \/Page\b/g)||[]).length).toBe(4);
+ expect((pdf.toString('latin1').match(/\/Type \/Page\b/g)||[]).length).toBeGreaterThanOrEqual(5);
  const edited=await owner.patch(`/api/trades/${record.id}`,{data:{accountId:account.id,date:'2026-10-17',symbol:'EUR/USD',pnl:'125',setupGrade:'B+',mindset:'neutral',feelings:'Followed the plan.',version:record.version}});
  expect(edited.status(),await edited.text()).toBe(200);
- expect(await edited.json()).toMatchObject({date:'2026-10-17',setupGrade:'B+',mindset:'neutral',feelings:'Followed the plan.'});
+ expect(await edited.json()).toMatchObject({date:'2026-10-17',setupGrade:'B+',mindset:'neutral',feelings:'Followed the plan.',additionalEvidenceUrls:evidenceLinks});
  const moved=await (await owner.get(`/api/calendar?accountId=${account.id}&month=2026-10`)).json();expect(moved.trades[0].date).toBe('2026-10-17');
  expect((await owner.delete(`/api/trades/${record.id}/evidence`)).status()).toBe(200);
  expect((await owner.get(`/api/trades/${record.id}/evidence`)).status()).toBe(404);
@@ -198,10 +199,25 @@ test('login, import parity, journal filters, editing, saving and deletion throug
  await page.getByLabel('Search operations').fill('GBP/USD');await expect(page.getByText('1–4 of 4 operations')).toBeVisible();
  await page.getByLabel('Search operations').fill('');await page.getByLabel('Filter by result').selectOption('all');
  await page.getByRole('button',{name:'Record operation',exact:true}).first().click();await expect(page.getByRole('dialog')).toContainText('Pause before you record');await page.getByRole('button',{name:'Continue',exact:true}).click();
+ await page.getByText('Context & trade review').click();
+ for(const width of [320,390,820,1366]){
+  await page.setViewportSize({width,height:844});
+  const bounds=await page.getByRole('dialog').evaluate(node=>({width:node.getBoundingClientRect().width,height:node.getBoundingClientRect().height,viewportWidth:window.innerWidth,viewportHeight:window.innerHeight,scrollable:node.scrollHeight>node.clientHeight}));
+  expect(bounds.width).toBeLessThanOrEqual(bounds.viewportWidth);
+  expect(bounds.height).toBeLessThanOrEqual(bounds.viewportHeight);
+  if(width<=390)expect(bounds.scrollable).toBe(true);
+ }
+ await page.setViewportSize({width:1440,height:900});
  const today=await page.evaluate(()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;});
  await expect(page.getByLabel('Trade date')).toHaveValue(today);
  await page.getByLabel('Trade date').fill('2026-10-17');await page.getByLabel('Instrument',{exact:true}).fill('QA/USD');await page.getByLabel('Net result (USD)').fill('125');await page.getByLabel('Risk per trade (%)').fill('1');await page.getByLabel('Planned reward / risk (R)').fill('2');
- await page.getByText('Context & trade review').click();await page.getByLabel('Setup grade').selectOption('A+');await page.getByLabel('Mindset & execution').selectOption('fear');await page.getByLabel('Mindset note (optional)').fill('Waited for the setup.');
+ await page.getByLabel('Setup grade').selectOption('A+');await page.getByLabel('Mindset & execution').selectOption('fear');await page.getByLabel('Mindset note (optional)').fill('Waited for the setup.');
+ await expect(page.getByLabel('Strategy / setup')).toHaveCount(1);
+ await page.getByLabel('Strategy / setup').fill('Breakout');
+ await page.getByLabel('Evidence link 1').fill('https://example.com/one');
+ await page.getByLabel('Evidence link 2').fill('https://example.com/two');
+ await page.getByLabel('Evidence link 3').fill('https://example.com/three');
+ await page.getByLabel('Evidence link 4').fill('https://example.com/four');
  await page.getByLabel('Paste a chart screenshot here, or choose an image.').evaluate(node=>{
   const png=Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/f2kAAAAASUVORK5CYII='),c=>c.charCodeAt(0));
   const transfer=new DataTransfer();transfer.items.add(new File([png],'chart.png',{type:'image/png'}));
@@ -209,7 +225,7 @@ test('login, import parity, journal filters, editing, saving and deletion throug
  });
  await expect(page.getByAltText('Trade evidence screenshot')).toBeVisible();
  await page.getByRole('button',{name:'Record operation',exact:true}).last().click();await expect(page.getByRole('dialog')).not.toBeVisible();
- await page.getByLabel('Search operations').fill('QA/USD');await page.getByText('QA/USD',{exact:true}).click();await expect(page.getByText('Waited for the setup.')).toBeVisible();await expect(page.getByAltText('Trade evidence screenshot')).toBeVisible();await page.getByRole('button',{name:'Edit operation',exact:true}).click();await page.getByLabel('Net result (USD)').fill('150');await page.getByRole('button',{name:'Save changes',exact:true}).click();await expect(page.getByText('+$150.00',{exact:true})).toBeVisible();
+ await page.getByLabel('Search operations').fill('QA/USD');await page.getByText('QA/USD',{exact:true}).click();await expect(page.getByText('Waited for the setup.')).toBeVisible();await expect(page.getByAltText('Trade evidence screenshot')).toBeVisible();for(const index of [1,2,3,4])await expect(page.getByRole('link',{name:`Open trade evidence ${index}`})).toBeVisible();await page.getByRole('button',{name:'Edit operation',exact:true}).click();for(const [index,path] of [[1,'one'],[2,'two'],[3,'three'],[4,'four']] as const)await expect(page.getByLabel(`Evidence link ${index}`)).toHaveValue(`https://example.com/${path}`);await page.getByLabel('Net result (USD)').fill('150');await page.getByRole('button',{name:'Save changes',exact:true}).click();await expect(page.getByText('+$150.00',{exact:true})).toBeVisible();
  await page.reload();await expect(page.getByText('+$150.00',{exact:true})).toBeVisible();await page.getByText('QA/USD',{exact:true}).click();await page.getByRole('button',{name:'Delete operation',exact:true}).click();await page.getByRole('button',{name:'Delete operation',exact:true}).click();await expect(page.getByRole('dialog')).not.toBeVisible();
  await page.getByRole('link',{name:'Monte Carlo',exact:true}).click();await expect(page.getByText('Possible account paths')).toBeVisible();await expect(page.locator('.simulation-chart svg')).toBeVisible();
  await page.getByRole('button',{name:'Save',exact:true}).click();await page.getByLabel('Scenario name').fill('Verified simulation');await page.getByRole('button',{name:'Save scenario',exact:true}).click();await expect(page.getByText('Scenario saved to your workspace.')).toBeVisible();
