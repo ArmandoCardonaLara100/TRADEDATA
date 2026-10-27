@@ -1,6 +1,24 @@
 export const EVIDENCE_BUCKET = 'trade-evidence';
+export const EVIDENCE_SLOTS = 4;
 // Below Vercel Functions' 4.5 MB request/response ceiling, including multipart overhead.
 export const MAX_EVIDENCE_BYTES = 4 * 1024 * 1024;
+
+export type EvidencePaths={evidencePath?:string|null;additionalEvidencePaths?:string[]|null};
+
+export function evidencePathForSlot(trade:EvidencePaths,slot:number) {
+  return slot===1?trade.evidencePath||'':trade.additionalEvidencePaths?.[slot-2]||'';
+}
+
+export function replaceEvidencePath(trade:EvidencePaths,slot:number,path:string) {
+  if(slot===1)return {evidencePath:path};
+  const additional=Array.from({length:EVIDENCE_SLOTS-1},(_,index)=>trade.additionalEvidencePaths?.[index]||'');
+  additional[slot-2]=path;
+  return {additionalEvidencePaths:additional};
+}
+
+export function allEvidencePaths(trade:EvidencePaths) {
+  return [trade.evidencePath||'',...(trade.additionalEvidencePaths||[])].filter(Boolean);
+}
 
 const signatures: Record<string,{extension:string;valid:(bytes:Uint8Array)=>boolean}> = {
   'image/png': {extension:'png',valid:b=>b.length>=8&&[137,80,78,71,13,10,26,10].every((v,i)=>b[i]===v)},

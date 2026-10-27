@@ -67,6 +67,11 @@ test('authenticated parity, validation, isolated access and conflicting edits',a
  expect((await owner.patch(`/api/trades/${trade.id}`,{data:{accountId:account.id,pnl:'200',version:1},timeout:10000})).status()).toBe(409);
  expect((await outsider.delete(`/api/trades/${trade.id}?version=2`)).status()).toBe(409);
  const balance=await (await owner.get(`/api/workspace?accountId=${account.id}`)).json();expect(balance.analytics.balance).toBe(1150);
+ const renamed=await owner.patch(`/api/accounts/${account.id}`,{data:{name:'Renamed lifecycle account',initialBalance:'1000',currency:account.currency,breakEvenBand:'10'}});
+ expect(renamed.status(),await renamed.text()).toBe(200);expect((await renamed.json()).id).toBe(account.id);
+ expect((await outsider.patch(`/api/accounts/${account.id}`,{data:{name:'Intrusion',initialBalance:'1000',currency:'USD',breakEvenBand:'10'}})).status()).toBe(404);
+ const afterRename=await (await owner.get(`/api/workspace?accountId=${account.id}`)).json();
+ expect(afterRename.account).toMatchObject({id:account.id,name:'Renamed lifecycle account'});expect(afterRename.analytics.balance).toBe(1150);expect(afterRename.recent[0].id).toBe(trade.id);
  expect((await owner.delete(`/api/trades/${trade.id}?version=2`)).status()).toBe(200);expect((await owner.delete(`/api/accounts/${account.id}`)).status()).toBe(200);
  const other=await (await outsider.get('/api/workspace')).json();expect(other.accounts).toHaveLength(0);
 });
@@ -134,7 +139,7 @@ test('calendar follows dated journal changes and keeps account ownership',async(
  expect((await owner.patch('/api/preferences',{data:{theme:'dark',accountId}})).status()).toBe(200);
  expect((await owner.delete(`/api/accounts/${account.id}`)).status()).toBe(200);
 });
-test('trade date, review fields, private evidence and four-section PDF persist',async()=>{
+test('trade date, four private evidence slots, Quick Look, and PDF persist',async({page})=>{
  const created=await owner.post('/api/accounts',{data:{name:'Review fields test',initialBalance:'10000'}});
  expect(created.status(),await created.text()).toBe(201);
  const account=await created.json();
@@ -144,14 +149,24 @@ test('trade date, review fields, private evidence and four-section PDF persist',
  const record=await saved.json();
  expect(record).toMatchObject({date:'2026-10-18',setupGrade:'A+',mindset:'fear',feelings:'Waited for confirmation.',evidenceUrl:'https://example.com/chart-1',additionalEvidenceUrls:evidenceLinks});
  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/f2kAAAAASUVORK5CYII=','base64');
- const upload=await owner.post(`/api/trades/${record.id}/evidence`,{multipart:{image:{name:'chart.png',mimeType:'image/png',buffer:png}}});
- expect(upload.status(),await upload.text()).toBe(200);
- const image=await owner.get(`/api/trades/${record.id}/evidence`);
- expect(image.status()).toBe(200);expect(image.headers()['content-type']).toContain('image/png');expect(await image.body()).toEqual(png);
- expect((await outsider.get(`/api/trades/${record.id}/evidence`)).status()).toBe(404);
+ for(const slot of [1,4]){const upload=await owner.post(`/api/trades/${record.id}/evidence?slot=${slot}`,{multipart:{image:{name:`chart-${slot}.png`,mimeType:'image/png',buffer:png}}});expect(upload.status(),await upload.text()).toBe(200);}
+ for(const slot of [1,4]){const image=await owner.get(`/api/trades/${record.id}/evidence?slot=${slot}`);expect(image.status()).toBe(200);expect(image.headers()['content-type']).toContain('image/png');expect(await image.body()).toEqual(png);expect((await outsider.get(`/api/trades/${record.id}/evidence?slot=${slot}`)).status()).toBe(404);}
+ expect((await owner.get(`/api/trades/${record.id}/evidence?slot=5`)).status()).toBe(422);
  const stored=await (await owner.get(`/api/trades?accountId=${account.id}`)).json();
  expect(stored.trades[0]).toMatchObject({date:'2026-10-18',setupGrade:'A+',mindset:'fear',feelings:'Waited for confirmation.',evidenceUrl:'https://example.com/chart-1',additionalEvidenceUrls:evidenceLinks});
  expect(stored.trades[0].evidencePath).toContain(`${testUserIds[0]}/${record.id}/`);
+ expect(stored.trades[0].additionalEvidencePaths[2]).toContain(`${testUserIds[0]}/${record.id}/4-`);
+ expect((await owner.patch('/api/preferences',{data:{theme:'dark',accountId:account.id}})).status()).toBe(200);
+ const state=await owner.storageState();await page.context().addCookies(state.cookies);await page.goto('/journal');
+ await page.getByRole('button',{name:`View operation ${record.sequence}`}).click();
+ const fourthPreview=page.getByRole('button',{name:'Open evidence preview 4'});await expect(fourthPreview).toBeVisible();await fourthPreview.click();
+ await expect(page.getByRole('button',{name:'Close evidence preview'})).toBeVisible();await page.keyboard.press('Escape');await expect(fourthPreview).toBeFocused();
+ await fourthPreview.click();await page.getByRole('button',{name:'Close evidence preview'}).click();await expect(fourthPreview).toBeFocused();
+ await page.getByRole('button',{name:'Edit operation'}).click();await expect(page.locator('.evidence-slot')).toHaveCount(4);
+ await page.getByLabel('Choose image 2').setInputFiles({name:'selected.png',mimeType:'image/png',buffer:png});
+ await expect(page.locator('.evidence-slot').nth(1)).toContainText('Selected');await expect(page.getByRole('button',{name:'Open evidence preview 2'})).toHaveCount(0);
+ for(const width of [320,768,1366]){await page.setViewportSize({width,height:900});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);}
+ await page.getByRole('button',{name:'Cancel'}).click();
  const calendar=await (await owner.get(`/api/calendar?accountId=${account.id}&month=2026-10`)).json();
  expect(calendar.trades[0].date).toBe('2026-10-18');
  const report=await owner.get(`/api/report?accountId=${account.id}&month=2026-10&lang=en`);
@@ -162,8 +177,11 @@ test('trade date, review fields, private evidence and four-section PDF persist',
  expect(edited.status(),await edited.text()).toBe(200);
  expect(await edited.json()).toMatchObject({date:'2026-10-17',setupGrade:'B+',mindset:'neutral',feelings:'Followed the plan.',additionalEvidenceUrls:evidenceLinks});
  const moved=await (await owner.get(`/api/calendar?accountId=${account.id}&month=2026-10`)).json();expect(moved.trades[0].date).toBe('2026-10-17');
- expect((await owner.delete(`/api/trades/${record.id}/evidence`)).status()).toBe(200);
- expect((await owner.get(`/api/trades/${record.id}/evidence`)).status()).toBe(404);
+ expect((await owner.delete(`/api/trades/${record.id}/evidence?slot=4`)).status()).toBe(200);
+ expect((await owner.get(`/api/trades/${record.id}/evidence?slot=4`)).status()).toBe(404);expect((await owner.get(`/api/trades/${record.id}/evidence?slot=1`)).status()).toBe(200);
+ expect((await owner.delete(`/api/trades/${record.id}/evidence?slot=1`)).status()).toBe(200);
+ expect((await owner.get(`/api/trades/${record.id}/evidence?slot=1`)).status()).toBe(404);
+ expect((await owner.patch('/api/preferences',{data:{theme:'dark',accountId}})).status()).toBe(200);
  expect((await owner.delete(`/api/accounts/${account.id}`)).status()).toBe(200);
 });
 test('review submission, moderation and public publication remain ownership-scoped',async({request})=>{
@@ -220,12 +238,12 @@ test('login, import parity, journal filters, editing, saving and deletion throug
  await page.getByLabel('Evidence link 2').fill('https://example.com/two');
  await page.getByLabel('Evidence link 3').fill('https://example.com/three');
  await page.getByLabel('Evidence link 4').fill('https://example.com/four');
- await page.getByLabel('Paste a chart screenshot here, or choose an image.').evaluate(node=>{
+ await page.getByLabel('Paste a chart screenshot here, or choose an image.',{exact:true}).evaluate(node=>{
   const png=Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/f2kAAAAASUVORK5CYII='),c=>c.charCodeAt(0));
   const transfer=new DataTransfer();transfer.items.add(new File([png],'chart.png',{type:'image/png'}));
   node.dispatchEvent(new ClipboardEvent('paste',{bubbles:true,cancelable:true,clipboardData:transfer}));
  });
- await expect(page.getByAltText('Trade evidence screenshot')).toBeVisible();
+ await expect(page.getByAltText('Selected evidence image 1')).toBeVisible();
  await page.getByRole('button',{name:'Record operation',exact:true}).last().click();await expect(page.getByRole('dialog')).not.toBeVisible();
  await page.getByLabel('Search operations').fill('QA/USD');await page.getByText('QA/USD',{exact:true}).click();await expect(page.getByText('Waited for the setup.')).toBeVisible();await expect(page.getByAltText('Trade evidence screenshot')).toBeVisible();for(const index of [1,2,3,4])await expect(page.getByRole('link',{name:`Open trade evidence ${index}`})).toBeVisible();await page.getByRole('button',{name:'Edit operation',exact:true}).click();for(const [index,path] of [[1,'one'],[2,'two'],[3,'three'],[4,'four']] as const)await expect(page.getByLabel(`Evidence link ${index}`)).toHaveValue(`https://example.com/${path}`);await page.getByLabel('Net result (USD)').fill('150');await page.getByRole('button',{name:'Save changes',exact:true}).click();await expect(page.getByText('+$150.00',{exact:true})).toBeVisible();
  await page.reload();await expect(page.getByText('+$150.00',{exact:true})).toBeVisible();await page.getByText('QA/USD',{exact:true}).click();await page.getByRole('button',{name:'Delete operation',exact:true}).click();await page.getByRole('button',{name:'Delete operation',exact:true}).click();await expect(page.getByRole('dialog')).not.toBeVisible();

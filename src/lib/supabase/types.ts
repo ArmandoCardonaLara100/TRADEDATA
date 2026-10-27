@@ -149,6 +149,7 @@ export type Database = {
       trades: {
         Row: {
           accountId: string
+          additionalEvidencePaths: string[]
           additionalEvidenceUrls: string[]
           created_at: string
           date: string | null
@@ -176,6 +177,7 @@ export type Database = {
         }
         Insert: {
           accountId: string
+          additionalEvidencePaths?: string[]
           additionalEvidenceUrls?: string[]
           created_at?: string
           date?: string | null
@@ -203,6 +205,7 @@ export type Database = {
         }
         Update: {
           accountId?: string
+          additionalEvidencePaths?: string[]
           additionalEvidenceUrls?: string[]
           created_at?: string
           date?: string | null
@@ -358,6 +361,7 @@ export type Database = {
       trade_records: {
         Row: {
           accountId: string | null
+          additionalEvidencePaths: string[] | null
           additionalEvidenceUrls: string[] | null
           date: string | null
           direction: string | null
@@ -383,6 +387,7 @@ export type Database = {
         }
         Insert: {
           accountId?: string | null
+          additionalEvidencePaths?: string[] | null
           additionalEvidenceUrls?: string[] | null
           date?: string | null
           direction?: string | null
@@ -408,6 +413,7 @@ export type Database = {
         }
         Update: {
           accountId?: string | null
+          additionalEvidencePaths?: string[] | null
           additionalEvidenceUrls?: string[] | null
           date?: string | null
           direction?: string | null
@@ -452,6 +458,10 @@ export type Database = {
     Functions: {
       import_workbook: { Args: { p_sheets: Json }; Returns: Json }
       save_trade: { Args: { p_data: Json; p_id?: string }; Returns: Json }
+      set_trade_evidence_path: {
+        Args: { p_path: string; p_slot: number; p_trade_id: string }
+        Returns: string
+      }
     }
     Enums: {
       [_ in never]: never

@@ -3,7 +3,7 @@ import {calculateAnalytics,calculateWinningRiskReward} from '../src/lib/analytic
 import type {Trade,TradingAccount} from '../src/types/trading';
 
 const accountId='11111111-1111-4111-8111-111111111111';
-function trade(sequence:number,pnl:string|null):Trade{return {id:String(sequence),accountId,sequence,date:null,symbol:'',riskPercent:null,rewardRisk:null,duration:null,pnl,notes:'',feelings:'',evidenceUrl:'',additionalEvidenceUrls:[],evidencePath:'',strategy:'',setupGrade:'',mindset:'',direction:'',session:'',tags:'',sourceRow:null,version:1};}
+function trade(sequence:number,pnl:string|null):Trade{return {id:String(sequence),accountId,sequence,date:null,symbol:'',riskPercent:null,rewardRisk:null,duration:null,pnl,notes:'',feelings:'',evidenceUrl:'',additionalEvidenceUrls:[],evidencePath:'',additionalEvidencePaths:[],strategy:'',setupGrade:'',mindset:'',direction:'',session:'',tags:'',sourceRow:null,version:1};}
 const trades=(...pnl:(string|null)[])=>pnl.map((value,index)=>trade(index+1,value));
 
 describe('winning-operation Risk/Reward',()=>{
