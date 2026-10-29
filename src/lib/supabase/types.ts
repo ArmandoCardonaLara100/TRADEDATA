@@ -146,6 +146,51 @@ export type Database = {
         }
         Relationships: []
       }
+      trade_shares: {
+        Row: {
+          created_at: string
+          enabled: boolean
+          id: string
+          token_hash: string
+          trade_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          token_hash: string
+          trade_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          token_hash?: string
+          trade_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trade_shares_trade_owner_fkey"
+            columns: ["trade_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "trade_records"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "trade_shares_trade_owner_fkey"
+            columns: ["trade_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "trades"
+            referencedColumns: ["id", "user_id"]
+          },
+        ]
+      }
       trades: {
         Row: {
           accountId: string

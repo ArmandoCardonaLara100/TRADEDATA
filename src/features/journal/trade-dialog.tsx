@@ -1,6 +1,6 @@
 'use client';
 import {useEffect,useState,type ClipboardEvent,type FormEvent} from 'react';
-import {ExternalLink,ImagePlus,LoaderCircle,Pencil,RotateCcw,Trash2,Upload,X} from 'lucide-react';
+import {ExternalLink,ImagePlus,Link2,LoaderCircle,Pencil,RotateCcw,Trash2,Upload,X} from 'lucide-react';
 import {Modal,Button,Field,ErrorMessage} from '@/components/ui';
 import {api,message} from '@/lib/client';
 import {useWorkspace} from '@/features/workspace/context';
@@ -13,6 +13,7 @@ import {numericInputValue} from '@/lib/numeric-input';
 import {EVIDENCE_SLOTS,MAX_EVIDENCE_BYTES,evidencePathForSlot} from '@/lib/evidence';
 import {localTradeDate} from '@/lib/trade-date';
 import {EvidenceImage} from './evidence-image';
+import {ShareTradeDialog} from './share-trade-dialog';
 
 const imageTypes=['image/png','image/jpeg','image/webp','image/gif'];
 const mindsetValues=['euphoria','trust','neutral','fear','fomo','anxiety'] as const;
@@ -129,7 +130,7 @@ export function TradeDialog({open,onOpenChange,trade,onPersisted,onSaved}:{open:
 }
 
 export function TradeDetails({trade,onClose,onChanged}:{trade:Trade|null;onClose:()=>void;onChanged?:()=>void|Promise<void>}){
- const {account,refresh,notify}=useWorkspace(),{t}=useLanguage();const [editing,setEditing]=useState(false),[deleting,setDeleting]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('');if(!trade||!account)return null;
+ const {account,refresh,notify}=useWorkspace(),{t}=useLanguage();const [editing,setEditing]=useState(false),[deleting,setDeleting]=useState(false),[sharing,setSharing]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('');if(!trade||!account)return null;
  const outcome=classify(trade.pnl,account.breakEvenBand),paths=Array.from({length:EVIDENCE_SLOTS},(_,index)=>evidencePathForSlot(trade,index+1)),links=[trade.evidenceUrl,...(trade.additionalEvidenceUrls||[])],tradeId=trade.id,tradeVersion=trade.version;
  async function remove(){setBusy(true);setError('');try{await api(`/api/trades/${tradeId}?version=${tradeVersion}`,{method:'DELETE'});await refresh();await onChanged?.();notify(t('journal.deleted'));setDeleting(false);onClose();}catch(e){setError(message(e));}finally{setBusy(false);}}
  return <><Modal open={!editing&&!deleting} onOpenChange={v=>{if(!v)onClose();}} title={`${t('journal.operation')} #${trade.sequence}`} description={`${trade.symbol||t('journal.unspecified')} · ${trade.date||t('journal.noDate')}`} wide>
@@ -138,6 +139,6 @@ export function TradeDetails({trade,onClose,onChanged}:{trade:Trade|null;onClose
   {trade.notes&&<div className="detail-notes"><h3>{t('journal.analysis')}</h3><p>{trade.notes}</p></div>}{trade.feelings&&<div className="detail-notes"><h3>{t('journal.mindsetNote')}</h3><p>{trade.feelings}</p></div>}{trade.tags&&<p className="muted">{t('journal.tags')}: {trade.tags}</p>}
   {(paths.some(Boolean)||links.some(Boolean))&&<section className="trade-evidence"><h3>{t('journal.evidenceTitle')}</h3><div className="trade-evidence-grid">{paths.map((path,index)=>(path||links[index])&&<div className="trade-evidence-slot" key={index}><strong>{t('journal.evidenceSlot')} {index+1}</strong>{path&&<EvidenceImage src={`/api/trades/${trade.id}/evidence?slot=${index+1}`} alt={`${t('journal.evidencePreview')} ${index+1}`} openLabel={`${t('journal.openPreview')} ${index+1}`} closeLabel={t('journal.closePreview')}/>} {links[index]&&<a href={links[index]} target="_blank" rel="noopener noreferrer" className="text-link" aria-label={`${t('journal.openEvidence')} ${index+1}`}>{t('journal.openEvidence')}<ExternalLink size={15}/></a>}</div>)}</div></section>}
   {trade.sourceRow&&<p className="source-caption">Imported from {account.sourceSheet}, row {trade.sourceRow}. Operation order is preserved.</p>}
-  <div className="dialog-actions spread"><Button variant="ghost" onClick={()=>setDeleting(true)}><Trash2 size={15}/>{t('journal.delete')}</Button><Button onClick={()=>setEditing(true)}><Pencil size={15}/>{t('journal.edit')}</Button></div>
- </Modal><TradeDialog key={`${trade.id}-${trade.version}`} open={editing} onOpenChange={setEditing} trade={trade} onPersisted={onChanged} onSaved={onClose}/><Modal open={deleting} onOpenChange={setDeleting} title={t('journal.deleteTitle')} description={t('journal.deleteDescription').replace('{number}',String(trade.sequence))}><ErrorMessage error={error}/><div className="dialog-actions"><Button variant="secondary" onClick={()=>setDeleting(false)}>{t('journal.keep')}</Button><Button variant="danger" loading={busy} onClick={remove}>{t('journal.delete')}</Button></div></Modal></>;
+  <div className="dialog-actions spread"><Button variant="ghost" onClick={()=>setDeleting(true)}><Trash2 size={15}/>{t('journal.delete')}</Button><div className="trade-detail-actions"><Button variant="secondary" onClick={()=>setSharing(true)}><Link2 size={15}/>{t('share.action')}</Button><Button onClick={()=>setEditing(true)}><Pencil size={15}/>{t('journal.edit')}</Button></div></div>
+ </Modal><TradeDialog key={`${trade.id}-${trade.version}`} open={editing} onOpenChange={setEditing} trade={trade} onPersisted={onChanged} onSaved={onClose}/><ShareTradeDialog tradeId={trade.id} sequence={trade.sequence} open={sharing} onOpenChange={setSharing}/><Modal open={deleting} onOpenChange={setDeleting} title={t('journal.deleteTitle')} description={t('journal.deleteDescription').replace('{number}',String(trade.sequence))}><ErrorMessage error={error}/><div className="dialog-actions"><Button variant="secondary" onClick={()=>setDeleting(false)}>{t('journal.keep')}</Button><Button variant="danger" loading={busy} onClick={remove}>{t('journal.delete')}</Button></div></Modal></>;
 }

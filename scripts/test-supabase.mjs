@@ -4,7 +4,7 @@ import {loadEnvFile} from 'node:process';
 try { loadEnvFile('.env.local'); } catch { /* CI provides environment variables. */ }
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 if (!url) throw new Error('Configure NEXT_PUBLIC_SUPABASE_URL before running integration tests.');
-let key = process.env.SUPABASE_TEST_SECRET_KEY;
+let key = process.env.SUPABASE_TEST_SECRET_KEY || process.env.SUPABASE_SECRET_KEY;
 if (!key) {
   const ref = new URL(url).hostname.split('.')[0];
   const result = JSON.parse(execFileSync('supabase', ['projects','api-keys','--project-ref',ref,'--reveal','--output','json'], {encoding:'utf8',stdio:['ignore','pipe','pipe']}));

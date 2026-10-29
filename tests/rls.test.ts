@@ -38,7 +38,7 @@ test('RLS protects every user table, views, ownership reassignment and foreign a
   expect((await db.query<{initialBalance:string}>('select "initialBalance" from account_records')).rows[0].initialBalance).toBe('6000.12345678');
  });
  await asUser(b,async()=>{
-  for(const table of ['profiles','trading_accounts','trades','strategies','scenarios','preferences','account_records','trade_records']){
+  for(const table of ['profiles','trading_accounts','trades','trade_shares','strategies','scenarios','preferences','account_records','trade_records']){
    expect((await db.query('select * from '+table)).rows).toHaveLength(0);
   }
   expect((await db.query('update trading_accounts set name=$1 where id=$2 returning id',['Intrusion',accountId])).rows).toHaveLength(0);
@@ -83,6 +83,21 @@ test('private evidence objects are readable and writable only for the owning tra
   expect((await db.query('select name from storage.objects')).rows).toHaveLength(0);
   await expect(db.query('insert into storage.objects(bucket_id,name) values($1,$2)',['trade-evidence',path])).rejects.toThrow(/row-level security/);
  });
+});
+test('share capability records remain owner-only and anonymous users cannot list them',async()=>{
+ let shareId:string;
+ await asUser(a,async()=>{
+  const trade=(await db.query<{id:string}>('select id from trades where "accountId"=$1 limit 1',[accountId])).rows[0];
+  const inserted=await db.query<{id:string}>(`insert into trade_shares(trade_id,user_id,token_hash) values($1,$2,$3) returning id`,[trade.id,a,'a'.repeat(64)]);
+  shareId=inserted.rows[0].id;
+  expect((await db.query('select id from trade_shares where id=$1',[shareId])).rows).toHaveLength(1);
+ });
+ await asUser(b,async()=>{
+  expect((await db.query('select id from trade_shares where id=$1',[shareId!])).rows).toHaveLength(0);
+  expect((await db.query('update trade_shares set enabled=false where id=$1 returning id',[shareId!])).rows).toHaveLength(0);
+ });
+ await db.exec('set role anon');
+ try{await expect(db.query('select * from trade_shares')).rejects.toThrow(/permission denied/);}finally{await db.exec('reset role');}
 });
 test('deleting a trading account cascades trades without deleting the auth user',async()=>{
  await asUser(a,async()=>{

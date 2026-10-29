@@ -26,6 +26,11 @@ test.beforeAll(async({playwright})=>{
 });
 test.afterAll(async()=>{
  await owner?.dispose();await outsider?.dispose();
+ if(testUserIds.length){
+  const {data,error}=await admin.from('trades').select('evidencePath,additionalEvidencePaths').in('user_id',testUserIds);if(error)throw new Error(`Test evidence lookup failed: ${error.code}`);
+  const paths=(data||[]).flatMap(row=>[row.evidencePath,...(row.additionalEvidencePaths||[])]).filter(Boolean);
+  if(paths.length){const removed=await admin.storage.from('trade-evidence').remove(paths);if(removed.error)throw new Error(`Test evidence cleanup failed: ${removed.error.message}`);}
+ }
  // An approved review references its moderator, so remove test reviews before test users.
  if(testUserIds.length){const {error}=await admin.from('review_submissions').delete().in('user_id',testUserIds);if(error)throw new Error(`Test review cleanup failed: ${error.code}`);}
  for(const id of testUserIds){const {error}=await admin.auth.admin.deleteUser(id);if(error)throw new Error(`Test user cleanup failed: ${error.message}`);}
@@ -33,7 +38,7 @@ test.afterAll(async()=>{
 test('hosted Supabase RLS isolates users without application filtering',async()=>{
  const client=createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,{auth:{persistSession:false,autoRefreshToken:false}});
  const {error:loginError}=await client.auth.signInWithPassword({email:`other-${credentials.email}`,password:credentials.password});expect(loginError).toBeNull();
- for(const table of ['trading_accounts','trades','account_records','trade_records']){
+ for(const table of ['trading_accounts','trades','trade_shares','account_records','trade_records']){
   const {data,error}=await client.from(table).select('*').eq('user_id',testUserIds[0]);expect(error).toBeNull();expect(data).toEqual([]);
  }
  const stolen=await client.from('trades').insert({user_id:testUserIds[1],accountId,sequence:9999,pnl:99});expect(stolen.error?.code).toBe('23503');
@@ -184,6 +189,36 @@ test('trade date, four private evidence slots, Quick Look, and PDF persist',asyn
  expect((await owner.patch('/api/preferences',{data:{theme:'dark',accountId}})).status()).toBe(200);
  expect((await owner.delete(`/api/accounts/${account.id}`)).status()).toBe(200);
 });
+test('secure public trade sharing exposes only the allowlist and revokes immediately',async({page,request})=>{
+ const account=await (await owner.post('/api/accounts',{data:{name:'Never expose this account',initialBalance:'10000',breakEvenBand:'15'}})).json();
+ const created=await owner.post('/api/trades',{data:{accountId:account.id,date:'2026-10-28',symbol:'SHARE/USD',pnl:'150',riskPercent:'0.01',rewardRisk:'1.55',duration:'15',strategy:'New York Reversal',setupGrade:'A+',mindset:'neutral',notes:'Public analysis note',feelings:'Public mindset note',tags:'PRIVATE-TAG-DO-NOT-SHARE',evidenceUrl:'https://private.example.test/chart'}});
+ expect(created.status(),await created.text()).toBe(201);const trade=await created.json();
+ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/f2kAAAAASUVORK5CYII=','base64');
+ const upload=await owner.post(`/api/trades/${trade.id}/evidence?slot=1`,{multipart:{image:{name:'shared-chart.png',mimeType:'image/png',buffer:png}}});expect(upload.status(),await upload.text()).toBe(200);
+ const predictable=await request.get(`/share/${trade.id}`);expect(predictable.status()).toBe(200);expect(await predictable.text()).not.toContain('SHARE/USD');
+ expect((await outsider.get(`/api/trades/${trade.id}/share`)).status()).toBe(404);
+ expect((await outsider.post(`/api/trades/${trade.id}/share`)).status()).toBe(404);
+ expect((await owner.patch('/api/preferences',{data:{theme:'dark',accountId:account.id}})).status()).toBe(200);
+ const state=await owner.storageState();await page.context().addCookies(state.cookies);await page.goto('/journal');
+ await page.getByText('SHARE/USD',{exact:true}).click();await page.getByRole('button',{name:'Share operation',exact:true}).click();
+ const urlInput=page.getByLabel('Public sharing link');await expect(urlInput).toHaveValue(/\/share\/[A-Za-z0-9_-]{43}$/);const url=await urlInput.inputValue();
+ await page.context().grantPermissions(['clipboard-read','clipboard-write']);await page.getByRole('button',{name:'Copy link',exact:true}).click();await expect(page.getByText('Link copied',{exact:true})).toBeVisible();
+ const token=new URL(url).pathname.split('/').pop()!;expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);expect(token).not.toContain(trade.id);
+ const publicResponse=await request.get(url);expect(publicResponse.status(),await publicResponse.text()).toBe(200);const html=await publicResponse.text();
+ for(const allowed of ['SHARE/USD','Public analysis note','Public mindset note','New York Reversal'])expect(html).toContain(allowed);
+ for(const secret of [credentials.email,testUserIds[0],account.id,account.name,trade.id,'PRIVATE-TAG-DO-NOT-SHARE','private.example.test'])expect(html).not.toContain(secret);
+ const evidence=await request.get(`/api/share/${token}/evidence?slot=1`);expect(evidence.status()).toBe(200);expect(evidence.headers()['cache-control']).toContain('no-store');expect(await evidence.body()).toEqual(png);
+ expect((await request.get(`/api/share/${token}/evidence?slot=2`)).status()).toBe(404);
+ const changedToken=`${token.slice(0,-1)}${token.at(-1)==='A'?'B':'A'}`;const invalid=await request.get(`/share/${changedToken}`);expect(invalid.status()).toBe(200);expect(await invalid.text()).not.toContain('SHARE/USD');
+ await page.context().clearCookies();await page.goto(url);await expect(page.getByRole('heading',{name:'Operation #1'})).toBeVisible();await expect(page.getByRole('link',{name:/TRADEDATA/})).toHaveAttribute('href','https://tradingdata.tech/');await expect(page.getByRole('link',{name:'Overview'})).toHaveCount(0);
+ const preview=page.getByRole('button',{name:'Open evidence preview 1'});await preview.click();await expect(page.getByRole('button',{name:'Close evidence preview'})).toBeVisible();await page.keyboard.press('Escape');await expect(preview).toBeFocused();
+ for(const width of [320,768,1366]){await page.setViewportSize({width,height:900});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);}
+ for(const theme of ['light','dark','system']){await page.getByLabel('Color theme').selectOption(theme);expect(['light','dark']).toContain(await page.getAttribute('html','data-theme'));}
+ await page.getByLabel('Language').selectOption('es');await expect(page.getByRole('heading',{name:'Operación #1'})).toBeVisible();
+ expect((await owner.delete(`/api/trades/${trade.id}/share`)).status()).toBe(200);const revoked=await request.get(url);expect(revoked.status()).toBe(200);expect(await revoked.text()).not.toContain('SHARE/USD');expect((await request.get(`/api/share/${token}/evidence?slot=1`)).status()).toBe(404);
+ expect((await owner.patch('/api/preferences',{data:{theme:'dark',accountId}})).status()).toBe(200);
+ expect((await owner.delete(`/api/accounts/${account.id}`)).status()).toBe(200);
+});
 test('review submission, moderation and public publication remain ownership-scoped',async({request})=>{
  const own=await owner.post('/api/reviews',{data:{reviewText:'Owner review must remain pending.'}});expect(own.status(),await own.text()).toBe(201);
  const ownReview=await own.json();expect(ownReview.status).toBe('pending');
@@ -199,7 +234,7 @@ test('review submission, moderation and public publication remain ownership-scop
  await client.auth.signOut({scope:'local'});
 });
 test('public authentication navigation and Google OAuth initiation are complete',async({page,request})=>{
- await page.goto('/');await page.getByRole('link',{name:'Log in',exact:true}).click();await expect(page).toHaveURL(/\/login$/);
+ await page.goto('/');const lightLogo=page.locator('.landing-header .brand-logo-light'),darkLogo=page.locator('.landing-header .brand-logo-dark');await page.getByLabel('Color theme').selectOption('light');await expect(lightLogo).toBeVisible();await expect(darkLogo).toBeHidden();await page.getByLabel('Color theme').selectOption('dark');await expect(darkLogo).toBeVisible();await expect(lightLogo).toBeHidden();await page.emulateMedia({colorScheme:'dark'});await page.getByLabel('Color theme').selectOption('system');await expect(darkLogo).toBeVisible();await page.emulateMedia({colorScheme:'light'});await expect(lightLogo).toBeVisible();const icon=await request.get('/icon.png');expect(icon.status()).toBe(200);expect(icon.headers()['content-type']).toContain('image/png');await page.getByRole('link',{name:'Log in',exact:true}).click();await expect(page).toHaveURL(/\/login$/);
  await expect(page.getByRole('button',{name:'Continue with Google',exact:true})).toBeVisible();await expect(page.getByRole('link',{name:'Back to Home',exact:true})).toBeVisible();
  await page.getByLabel('Color theme').selectOption('system');expect(await page.evaluate(()=>localStorage.getItem('theme'))).toBe('system');expect(['light','dark']).toContain(await page.getAttribute('html','data-theme'));
  await page.getByLabel('Language').selectOption('es');await expect(page.getByRole('button',{name:'Continuar con Google',exact:true})).toBeVisible();await page.getByRole('link',{name:'Volver al inicio',exact:true}).click();await expect(page).toHaveURL(base+'/');
