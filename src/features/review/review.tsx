@@ -58,7 +58,7 @@ export function Review({initial,viewerId}:{initial:ReviewWorkspace;viewerId:stri
   }
 
   return <>
-    <PageHeading eyebrow="YOUR VOICE" title="Share your review" description="Help shape TRADEDATA with an honest, useful review." />
+    <PageHeading eyebrow={t('page.reviewEyebrow')} title={t('page.reviewTitle')} description={t('page.reviewDescription')} />
     <div className="review-layout">
       <Panel title={t('review.formTitle')} description={t('review.formText')} className="review-form-panel">
         <form className="panel-body form-stack" onSubmit={submit}>

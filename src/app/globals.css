@@ -23,7 +23,8 @@
 /* Shared brand image and the three-field review context retain their visual rhythm across the app. */
 .brand-logo{width:32px;height:32px;flex:none;object-fit:contain}
 .brand-logo-swap{position:relative;display:block;width:32px;height:32px;flex:none}.brand-logo-swap .brand-logo{position:absolute;inset:0}.brand-logo-swap .brand-logo-dark{display:none}[data-theme=dark] .brand-logo-swap.theme-aware .brand-logo-light{display:none}[data-theme=dark] .brand-logo-swap.theme-aware .brand-logo-dark{display:block}
-.context-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+.context-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media(max-width:1020px) and (min-width:581px){.context-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:1020px){.sidebar .brand-logo{width:29px;height:29px}}
 @media(max-width:580px){.landing-header .brand-logo{width:28px;height:28px}.context-grid{grid-template-columns:1fr}}
 
