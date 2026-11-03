@@ -21,9 +21,10 @@ Set these values in `.env.local` and your deployment environment:
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
 NEXT_PUBLIC_APP_URL=
+TRADING_ECONOMICS_API_KEY=
 ```
 
-Use your Supabase project URL and **publishable** key. Set the application URL to `http://localhost:3000` locally and your HTTPS domain in production. The runtime does not use a database password or a service-role key. Never expose private credentials with a `NEXT_PUBLIC_` prefix or commit environment files.
+Use your Supabase project URL and **publishable** key. Set the application URL to `http://localhost:3000` locally and your HTTPS domain in production. The News section requires a licensed Trading Economics API key with the necessary display/redistribution rights; the key stays server-side and the calendar reports an unavailable state when it is absent. The runtime does not use a database password or a service-role key. Never expose private credentials with a `NEXT_PUBLIC_` prefix or commit environment files.
 
 ## Database and authentication
 

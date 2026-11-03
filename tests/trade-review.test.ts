@@ -7,7 +7,7 @@ import {generateReportPdf} from '../src/lib/report/pdf';
 import type {Trade,TradingAccount} from '../src/types/trading';
 
 const accountId='11111111-1111-4111-8111-111111111111';
-const account:TradingAccount={id:accountId,name:'Account A',currency:'USD',initialBalance:'10000',breakEvenBand:'0',sourceSheet:null,baselineBreakEven:false,riskMetric:'planned',createdAt:'2026-10-01'};
+const account:TradingAccount={id:accountId,name:'Account A',currency:'USD',initialBalance:'10000',breakEvenBand:'0',sourceSheet:null,baselineBreakEven:false,riskMetric:'planned',createdAt:'2026-10-01',accountType:'challenge',currentPhase:2,rules:[{phaseNumber:1,profitTarget:'8',maxLossLimit:'10',dailyLossLimit:'5',drawdownType:'static'},{phaseNumber:2,profitTarget:'5',maxLossLimit:'10',dailyLossLimit:'4',drawdownType:'trailing'}]};
 function trade(sequence:number,date:string,pnl:string):Trade{return {id:String(sequence),accountId,sequence,date,pnl,symbol:'EUR/USD',riskPercent:null,rewardRisk:null,duration:null,notes:'',feelings:'',evidenceUrl:'',additionalEvidenceUrls:[],evidencePath:'',additionalEvidencePaths:[],strategy:'Breakout',setupGrade:'A+',mindset:'fear',direction:'',session:'',tags:'',sourceRow:null,version:1};}
 
 describe('trade review additions',()=>{

@@ -52,6 +52,29 @@ test('RLS protects every user table, views, ownership reassignment and foreign a
   expect((await db.query('select * from trade_records')).rows).toHaveLength(1);
  });
 });
+test('account types and independent rules persist while account IDs and trades stay unchanged',async()=>{
+ let challengeId:string;
+ await asUser(a,async()=>{
+  const payload={name:'Three-phase evaluation',currency:'USD',initialBalance:'100000',breakEvenBand:'0',accountType:'challenge',currentPhase:2,rules:[
+   {phaseNumber:1,profitTarget:'8',maxLossLimit:'10',dailyLossLimit:'5',drawdownType:'static'},
+   {phaseNumber:2,profitTarget:'5',maxLossLimit:'9',dailyLossLimit:'4',drawdownType:'trailing'},
+   {phaseNumber:3,profitTarget:'4',maxLossLimit:'8',dailyLossLimit:'3',drawdownType:'static'},
+  ]};
+  const created=await db.query<{save_trading_account:string}>('select save_trading_account($1::jsonb)',[JSON.stringify(payload)]);challengeId=created.rows[0].save_trading_account;
+  await db.query('select save_trade($1::jsonb)',[JSON.stringify({accountId:challengeId,pnl:'125'})]);
+  const rules=await db.query<{phase_number:number;profitTarget:string}>('select phase_number,"profitTarget" from account_rule_records where account_id=$1 order by phase_number',[challengeId]);
+  expect(rules.rows.map(rule=>[rule.phase_number,rule.profitTarget])).toEqual([[1,'8.00000000'],[2,'5.00000000'],[3,'4.00000000']]);
+  const funded={...payload,name:'Funded now',accountType:'funded',currentPhase:null,rules:[{phaseNumber:null,profitTarget:'6',maxLossLimit:'10',dailyLossLimit:'5',drawdownType:'trailing'}]};
+  expect((await db.query<{save_trading_account:string}>('select save_trading_account($1::jsonb,$2)',[JSON.stringify(funded),challengeId])).rows[0].save_trading_account).toBe(challengeId);
+  expect((await db.query('select id from trades where "accountId"=$1',[challengeId])).rows).toHaveLength(1);
+  expect((await db.query<{accountType:string;currentPhase:number|null}>('select "accountType","currentPhase" from account_records where id=$1',[challengeId])).rows[0]).toEqual({accountType:'funded',currentPhase:null});
+  expect((await db.query<{rule_kind:string}>('select rule_kind from account_rule_records where account_id=$1',[challengeId])).rows).toEqual([{rule_kind:'funded'}]);
+ });
+ await asUser(b,async()=>{
+  expect((await db.query('select * from account_rule_records where account_id=$1',[challengeId!])).rows).toHaveLength(0);
+  await expect(db.query('select save_trading_account($1::jsonb,$2)',[JSON.stringify({name:'Intrusion',currency:'USD',initialBalance:'1',breakEvenBand:'0',accountType:'demo',currentPhase:null,rules:[]}),challengeId!])).rejects.toThrow(/Account not found/);
+ });
+});
 test('trade updates reject stale versions and return precise money',async()=>{
  await asUser(a,async()=>{
   const create=await db.query<{save_trade:{id:string;version:number;pnl:string}}>('select save_trade($1::jsonb)',[JSON.stringify({accountId,pnl:'999999999999.12345678'})]);

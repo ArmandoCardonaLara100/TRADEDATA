@@ -14,6 +14,63 @@ export type Database = {
   }
   public: {
     Tables: {
+      account_rules: {
+        Row: {
+          account_id: string
+          created_at: string
+          dailyLossLimit: number
+          drawdownType: string
+          id: string
+          maxLossLimit: number
+          phase_number: number | null
+          profitTarget: number
+          rule_kind: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          account_id: string
+          created_at?: string
+          dailyLossLimit: number
+          drawdownType: string
+          id?: string
+          maxLossLimit: number
+          phase_number?: number | null
+          profitTarget: number
+          rule_kind: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          account_id?: string
+          created_at?: string
+          dailyLossLimit?: number
+          drawdownType?: string
+          id?: string
+          maxLossLimit?: number
+          phase_number?: number | null
+          profitTarget?: number
+          rule_kind?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "account_rules_account_id_user_id_fkey"
+            columns: ["account_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "account_records"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "account_rules_account_id_user_id_fkey"
+            columns: ["account_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "trading_accounts"
+            referencedColumns: ["id", "user_id"]
+          },
+        ]
+      }
       preferences: {
         Row: {
           selectedAccountId: string | null
@@ -295,10 +352,12 @@ export type Database = {
       }
       trading_accounts: {
         Row: {
+          accountType: string | null
           baselineBreakEven: boolean
           breakEvenBand: number
           createdAt: string
           currency: string
+          currentPhase: number | null
           id: string
           initialBalance: number
           last_sequence: number
@@ -309,10 +368,12 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          accountType?: string | null
           baselineBreakEven?: boolean
           breakEvenBand?: number
           createdAt?: string
           currency?: string
+          currentPhase?: number | null
           id?: string
           initialBalance: number
           last_sequence?: number
@@ -323,10 +384,12 @@ export type Database = {
           user_id: string
         }
         Update: {
+          accountType?: string | null
           baselineBreakEven?: boolean
           breakEvenBand?: number
           createdAt?: string
           currency?: string
+          currentPhase?: number | null
           id?: string
           initialBalance?: number
           last_sequence?: number
@@ -360,10 +423,12 @@ export type Database = {
     Views: {
       account_records: {
         Row: {
+          accountType: string | null
           baselineBreakEven: boolean | null
           breakEvenBand: string | null
           createdAt: string | null
           currency: string | null
+          currentPhase: number | null
           id: string | null
           initialBalance: string | null
           last_sequence: number | null
@@ -374,10 +439,12 @@ export type Database = {
           user_id: string | null
         }
         Insert: {
+          accountType?: string | null
           baselineBreakEven?: boolean | null
           breakEvenBand?: never
           createdAt?: string | null
           currency?: string | null
+          currentPhase?: number | null
           id?: string | null
           initialBalance?: never
           last_sequence?: number | null
@@ -388,10 +455,12 @@ export type Database = {
           user_id?: string | null
         }
         Update: {
+          accountType?: string | null
           baselineBreakEven?: boolean | null
           breakEvenBand?: never
           createdAt?: string | null
           currency?: string | null
+          currentPhase?: number | null
           id?: string | null
           initialBalance?: never
           last_sequence?: number | null
@@ -402,6 +471,63 @@ export type Database = {
           user_id?: string | null
         }
         Relationships: []
+      }
+      account_rule_records: {
+        Row: {
+          account_id: string | null
+          created_at: string | null
+          dailyLossLimit: string | null
+          drawdownType: string | null
+          id: string | null
+          maxLossLimit: string | null
+          phase_number: number | null
+          profitTarget: string | null
+          rule_kind: string | null
+          updated_at: string | null
+          user_id: string | null
+        }
+        Insert: {
+          account_id?: string | null
+          created_at?: string | null
+          dailyLossLimit?: never
+          drawdownType?: string | null
+          id?: string | null
+          maxLossLimit?: never
+          phase_number?: number | null
+          profitTarget?: never
+          rule_kind?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          account_id?: string | null
+          created_at?: string | null
+          dailyLossLimit?: never
+          drawdownType?: string | null
+          id?: string | null
+          maxLossLimit?: never
+          phase_number?: number | null
+          profitTarget?: never
+          rule_kind?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "account_rules_account_id_user_id_fkey"
+            columns: ["account_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "account_records"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "account_rules_account_id_user_id_fkey"
+            columns: ["account_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "trading_accounts"
+            referencedColumns: ["id", "user_id"]
+          },
+        ]
       }
       trade_records: {
         Row: {
@@ -503,6 +629,10 @@ export type Database = {
     Functions: {
       import_workbook: { Args: { p_sheets: Json }; Returns: Json }
       save_trade: { Args: { p_data: Json; p_id?: string }; Returns: Json }
+      save_trading_account: {
+        Args: { p_data: Json; p_id?: string }
+        Returns: string
+      }
       set_trade_evidence_path: {
         Args: { p_path: string; p_slot: number; p_trade_id: string }
         Returns: string

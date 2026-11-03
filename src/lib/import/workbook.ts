@@ -1,6 +1,6 @@
 import {unzipSync,strFromU8} from 'fflate';
 import {XMLParser} from 'fast-xml-parser';
-import {tradeSchema,accountSchema} from '../validation/schemas';
+import {tradeSchema,accountIdentitySchema} from '../validation/schemas';
 import {createHash} from 'node:crypto';
 import {z} from 'zod';
 type Node=Record<string,unknown>;
@@ -29,7 +29,9 @@ export function parseWorkbook(buffer:Uint8Array):WorkbookImport[]{
   const initial=cells.get('B5');if(typeof initial!=='number'||initial<=0)throw new Error(`${name}: missing initial balance in B5.`);
   const isSeptember=name==='SEPTIEMBRE 2026';
   const info:WorkbookImport={name:isSeptember?'September 2026':'August–December 2026',initialBalance:String(initial),breakEvenBand:isSeptember?'25':'15',baselineBreakEven:cells.get('G5')===0,riskMetric:isSeptember?'planned':'average-win',sourceSheet:name,sourceHash:hash,rows:[]};
-  accountSchema.parse(info);
+  // Imported legacy workbooks intentionally remain unclassified. A type must
+  // be chosen by the owner because the workbook does not contain that fact.
+  accountIdentitySchema.parse(info);
   const end=isSeptember?25:105;
   for(let r=6;r<=end;r++){
    const get=(c:string)=>cells.get(`${c}${r}`);if(!['C','D','E','F','G','K','L'].some(c=>{if(!isSeptember&&(c==='K'||c==='L'))return false;return get(c)!==undefined;}))continue;

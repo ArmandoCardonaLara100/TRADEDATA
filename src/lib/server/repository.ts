@@ -3,7 +3,7 @@ import {HttpError} from './http';
 import {calculateAnalytics} from '../analytics/journal';
 import {calendarMonthBounds} from '../analytics/calendar';
 import {accountSchema,tradeSchema,scenarioSchema,reviewSubmissionSchema,reviewModerationSchema} from '../validation/schemas';
-import type {Trade,TradingAccount} from '@/types/trading';
+import type {AccountRule,AccountType,DrawdownType,Trade,TradingAccount} from '@/types/trading';
 import type {Json} from '../supabase/types';
 import type {parseWorkbook} from '../import/workbook';
 import type {ReviewSubmission,ReviewWorkspace,ReviewStatus} from '@/types/reviews';
@@ -19,10 +19,15 @@ export function check(error:DbError|null) {
  throw new HttpError(500,'The database request failed. Your changes were not saved. Please try again.');
 }
 // Numeric fields are text in RLS-protected views, preserving input precision.
-function accountDto(raw:unknown):TradingAccount {
- const a=raw as TradingAccount;
+function ruleDto(raw:unknown):AccountRule {
+ const rule=raw as {phase_number?:number|null;profitTarget?:string;maxLossLimit?:string;dailyLossLimit?:string;drawdownType?:DrawdownType};
+ if(typeof rule?.profitTarget!=='string'||typeof rule.maxLossLimit!=='string'||typeof rule.dailyLossLimit!=='string'||!['static','trailing'].includes(rule.drawdownType||''))throw new Error('Invalid account rule response.');
+ return {phaseNumber:rule.phase_number??null,profitTarget:rule.profitTarget,maxLossLimit:rule.maxLossLimit,dailyLossLimit:rule.dailyLossLimit,drawdownType:rule.drawdownType!};
+}
+function accountDto(raw:unknown,rules:AccountRule[]=[]):TradingAccount {
+ const a=raw as TradingAccount&{accountType?:AccountType|null;currentPhase?:number|null};
  if(!a?.id||typeof a.initialBalance!=='string')throw new Error('Invalid account response.');
- return a;
+ return {...a,accountType:a.accountType??null,currentPhase:a.currentPhase??null,rules};
 }
 function tradeDto(raw:unknown):Trade {
  const t=raw as Trade;
@@ -36,17 +41,24 @@ function reviewDto(raw:unknown):ReviewSubmission {
 }
 export async function ownedAccount(userId:string,id:string){
  const db=await supabaseServer();
- const {data,error}=await db.from('account_records').select('*').eq('user_id',userId).eq('id',id).maybeSingle();
- check(error);if(!data)throw new HttpError(404,'Trading account not found.');return accountDto(data);
+ const [accountResult,rulesResult]=await Promise.all([
+  db.from('account_records').select('*').eq('user_id',userId).eq('id',id).maybeSingle(),
+  db.from('account_rule_records').select('*').eq('user_id',userId).eq('account_id',id).order('phase_number'),
+ ]);
+ check(accountResult.error);check(rulesResult.error);if(!accountResult.data)throw new HttpError(404,'Trading account not found.');
+ return accountDto(accountResult.data,(rulesResult.data||[]).map(ruleDto));
 }
 export async function getWorkspace(userId:string,accountId?:string){
  const db=await supabaseServer();
- const [accountsResult,preferencesResult]=await Promise.all([
+ const [accountsResult,preferencesResult,rulesResult]=await Promise.all([
   db.from('account_records').select('*').eq('user_id',userId).order('createdAt'),
   db.from('preferences').select('*').eq('user_id',userId).maybeSingle(),
+  db.from('account_rule_records').select('*').eq('user_id',userId).order('phase_number'),
  ]);
- check(accountsResult.error);check(preferencesResult.error);
- const accounts=(accountsResult.data||[]).map(accountDto),preference=preferencesResult.data;
+ check(accountsResult.error);check(preferencesResult.error);check(rulesResult.error);
+ const rulesByAccount=new Map<string,AccountRule[]>();
+ for(const raw of rulesResult.data||[]){if(!raw.account_id)continue;const rules=rulesByAccount.get(raw.account_id)||[];rules.push(ruleDto(raw));rulesByAccount.set(raw.account_id,rules);}
+ const accounts=(accountsResult.data||[]).map(raw=>accountDto(raw,rulesByAccount.get(raw.id!)||[])),preference=preferencesResult.data;
  const account=accounts.find(a=>a.id===(accountId||preference?.selectedAccountId))||(accountId?undefined:accounts[0]);
  if(accountId&&!account)throw new HttpError(404,'Trading account not found.');
  if(!account)return {accounts,account:null,analytics:null,recent:[],theme:preference?.theme||'system'};
@@ -66,13 +78,13 @@ export async function getWorkspace(userId:string,accountId?:string){
 }
 export async function createAccount(userId:string,raw:unknown){
  const data=accountSchema.parse(raw),db=await supabaseServer();
- const {data:row,error}=await db.from('trading_accounts').insert({...data,user_id:userId}).select('id').single();
- check(error);return ownedAccount(userId,row!.id);
+ const result=await db.rpc('save_trading_account',{p_data:data as unknown as Json});
+ check(result.error);return ownedAccount(userId,result.data!);
 }
 export async function updateAccount(userId:string,id:string,raw:unknown){
  const data=accountSchema.parse(raw),db=await supabaseServer();
- const {data:row,error}=await db.from('trading_accounts').update(data).eq('id',id).eq('user_id',userId).select('id').maybeSingle();
- check(error);if(!row)throw new HttpError(404,'Trading account not found.');return ownedAccount(userId,id);
+ const result=await db.rpc('save_trading_account',{p_data:data as unknown as Json,p_id:id});
+ check(result.error);return ownedAccount(userId,result.data!);
 }
 export async function removeAccount(userId:string,id:string){
  const db=await supabaseServer();const paths:string[]=[];

@@ -8,8 +8,8 @@ import type {Trade,TradingAccount} from '@/types/trading';
 
 const blue='#3677F5',ink='#182131',muted='#66748C',line='#DCE4F0',green='#0A8866',red='#C34657';
 const labels={
- en:{overview:'Overview',journal:'Trading Journal',statistics:'Statistics',calendar:'Calendar',generated:'Generated',account:'Trading account',opening:'Opening balance',balance:'Current balance',net:'Net profit / loss',winRate:'Win rate',drawdown:'Maximum drawdown',riskReward:'Risk/Reward',total:'Closed operations',wins:'Wins',losses:'Losses',breakEven:'Break-even',grossProfit:'Gross profit',grossLoss:'Gross loss',profitFactor:'Profit factor',expectancy:'Expectancy per trade',avgWin:'Average winning trade',avgLoss:'Average losing trade',roi:'Return on starting capital',currentDrawdown:'Current drawdown',avgR:'Average R',recovery:'Recovery factor',mindset:'Mindset',date:'Trade date',number:'No.',instrument:'Instrument',result:'Net P/L',outcome:'Result',setup:'Setup / grade',noTrades:'No operations recorded for this account.',noDate:'Undated',open:'Open',noMonth:'No dated operations in this month.',note:'Days use the saved Trade Date. Green means positive net P/L; red means negative; neutral means zero.',page:'Page'},
- es:{overview:'Resumen',journal:'Diario de trading',statistics:'Estadísticas',calendar:'Calendario',generated:'Generado',account:'Cuenta de trading',opening:'Saldo inicial',balance:'Saldo actual',net:'Ganancia / pérdida neta',winRate:'Tasa de aciertos',drawdown:'Drawdown máximo',riskReward:'Riesgo/Beneficio',total:'Operaciones cerradas',wins:'Ganadoras',losses:'Perdedoras',breakEven:'Punto de equilibrio',grossProfit:'Ganancia bruta',grossLoss:'Pérdida bruta',profitFactor:'Factor de beneficio',expectancy:'Expectativa por operación',avgWin:'Ganancia media',avgLoss:'Pérdida media',roi:'Retorno sobre capital inicial',currentDrawdown:'Drawdown actual',avgR:'R promedio',recovery:'Factor de recuperación',mindset:'Estado emocional',date:'Fecha',number:'N.º',instrument:'Instrumento',result:'Resultado neto',outcome:'Estado',setup:'Setup / calificación',noTrades:'No hay operaciones registradas para esta cuenta.',noDate:'Sin fecha',open:'Abierta',noMonth:'No hay operaciones fechadas en este mes.',note:'Los días usan la fecha guardada de la operación. Verde indica resultado positivo; rojo, negativo; neutro, cero.',page:'Página'},
+ en:{overview:'Overview',journal:'Trading Journal',statistics:'Statistics',calendar:'Calendar',generated:'Generated',account:'Trading account',accountType:'Account type',challenge:'Challenge Account',funded:'Funded Account',ownCapital:'Own Capital',demo:'Demo',unclassified:'Not specified',phase:'Phase',profitTarget:'Profit target',profit:'Profit',maxLoss:'Max loss limit',dailyLoss:'Daily loss limit',drawdownType:'Drawdown type',staticDrawdown:'Static',trailingDrawdown:'Trailing',opening:'Opening balance',balance:'Current balance',net:'Net profit / loss',winRate:'Win rate',drawdown:'Maximum drawdown',riskReward:'Risk/Reward',total:'Closed operations',wins:'Wins',losses:'Losses',breakEven:'Break-even',grossProfit:'Gross profit',grossLoss:'Gross loss',profitFactor:'Profit factor',expectancy:'Expectancy per trade',avgWin:'Average winning trade',avgLoss:'Average losing trade',roi:'Return on starting capital',currentDrawdown:'Current drawdown',avgR:'Average R',recovery:'Recovery factor',mindset:'Mindset',date:'Trade date',number:'No.',instrument:'Instrument',result:'Net P/L',outcome:'Result',setup:'Setup / grade',noTrades:'No operations recorded for this account.',noDate:'Undated',open:'Open',noMonth:'No dated operations in this month.',note:'Days use the saved Trade Date. Green means positive net P/L; red means negative; neutral means zero.',page:'Page'},
+ es:{overview:'Resumen',journal:'Diario de trading',statistics:'Estadísticas',calendar:'Calendario',generated:'Generado',account:'Cuenta de trading',accountType:'Tipo de cuenta',challenge:'Cuenta de Challenge',funded:'Cuenta Fondeada',ownCapital:'Capital Propio',demo:'Demo',unclassified:'Sin especificar',phase:'Fase',profitTarget:'Objetivo de beneficio',profit:'Beneficio',maxLoss:'Límite máximo de pérdida',dailyLoss:'Límite de pérdida diaria',drawdownType:'Tipo de Drawdown',staticDrawdown:'Estático',trailingDrawdown:'Dinámico',opening:'Saldo inicial',balance:'Saldo actual',net:'Ganancia / pérdida neta',winRate:'Tasa de aciertos',drawdown:'Drawdown máximo',riskReward:'Riesgo/Beneficio',total:'Operaciones cerradas',wins:'Ganadoras',losses:'Perdedoras',breakEven:'Punto de equilibrio',grossProfit:'Ganancia bruta',grossLoss:'Pérdida bruta',profitFactor:'Factor de beneficio',expectancy:'Expectativa por operación',avgWin:'Ganancia media',avgLoss:'Pérdida media',roi:'Retorno sobre capital inicial',currentDrawdown:'Drawdown actual',avgR:'R promedio',recovery:'Factor de recuperación',mindset:'Estado emocional',date:'Fecha',number:'N.º',instrument:'Instrumento',result:'Resultado neto',outcome:'Estado',setup:'Setup / calificación',noTrades:'No hay operaciones registradas para esta cuenta.',noDate:'Sin fecha',open:'Abierta',noMonth:'No hay operaciones fechadas en este mes.',note:'Los días usan la fecha guardada de la operación. Verde indica resultado positivo; rojo, negativo; neutro, cero.',page:'Página'},
 } as const;
 export type ReportInput={account:TradingAccount;trades:Trade[];month:string;language:'en'|'es';generatedAt?:Date};
 
@@ -20,12 +20,15 @@ export async function generateReportPdf({account,trades,month,language,generated
  const chunks:Buffer[]=[];doc.on('data',(chunk:Buffer)=>chunks.push(chunk));
  const complete=new Promise<Buffer>((resolve,reject)=>{doc.on('end',()=>resolve(Buffer.concat(chunks)));doc.on('error',reject);});
  const width=doc.page.width-84;
+ const typeLabel=account.accountType==='challenge'?t.challenge:account.accountType==='funded'?t.funded:account.accountType==='own_capital'?t.ownCapital:account.accountType==='demo'?t.demo:t.unclassified;
+ const activeRule=account.accountType==='challenge'?account.rules.find(rule=>rule.phaseNumber===account.currentPhase):account.accountType==='funded'?account.rules.find(rule=>rule.phaseNumber===null):undefined;
  const pageHeaders=new Map<number,{title:string;index:string}>();
  function header(title:string,index:string){pageHeaders.set(doc.bufferedPageRange().count-1,{title,index});doc.y=165;}
  function renderHeader(title:string,index:string){
   doc.rect(0,0,doc.page.width,7).fill(blue);
   doc.fillColor(blue).font('Helvetica-Bold').fontSize(11).text('TRADEDATA',42,30);
-  doc.fillColor(muted).font('Helvetica').fontSize(9).text(`${t.account}: ${account.name}`,42,49,{width});
+  const phaseLabel=account.accountType==='challenge'&&account.currentPhase?` · ${t.phase} ${account.currentPhase}`:'';
+  doc.fillColor(muted).font('Helvetica').fontSize(9).text(`${t.account}: ${account.name} · ${t.accountType}: ${typeLabel}${phaseLabel}`,42,49,{width,ellipsis:true,lineBreak:false});
   doc.fillColor(ink).font('Helvetica-Bold').fontSize(25).text(title,42,86);
   doc.fillColor(muted).font('Helvetica').fontSize(9).text(`${index} / 04  ·  ${t.generated}: ${new Intl.DateTimeFormat(locale,{dateStyle:'medium'}).format(generatedAt)}`,42,122);
   doc.moveTo(42,146).lineTo(doc.page.width-42,146).strokeColor(line).stroke();
@@ -70,7 +73,15 @@ export async function generateReportPdf({account,trades,month,language,generated
  metric(t.recovery,number(a.recoveryFactor),54+col,253,col);
  statisticsGraphics(doc,a,language);
  doc.addPage();header(t.statistics,'03');y=175;
- const rows:[string,string][]=[
+ const accountRows:[string,string][]=[[t.accountType,typeLabel]];
+ if(account.accountType==='challenge'&&account.currentPhase)accountRows.push([t.phase,String(account.currentPhase)]);
+ if(activeRule)accountRows.push(
+  [account.accountType==='funded'?t.profit:t.profitTarget,percent(Number(activeRule.profitTarget))],
+  [t.maxLoss,percent(Number(activeRule.maxLossLimit))],
+  [t.dailyLoss,percent(Number(activeRule.dailyLossLimit))],
+  [t.drawdownType,activeRule.drawdownType==='trailing'?t.trailingDrawdown:t.staticDrawdown],
+ );
+ const rows:[string,string][]=[...accountRows,
   [t.total,String(a.total)],[t.wins,String(a.wins)],[t.losses,String(a.losses)],[t.breakEven,String(a.breakEven)],
   [t.winRate,percent(a.winRate*100,1)],[t.grossProfit,money(a.grossProfit,account.currency)],[t.grossLoss,money(a.grossLoss,account.currency)],
   [t.profitFactor,a.profitFactor===null?'—':number(a.profitFactor,2,2)],[t.expectancy,a.expectancy===null?'—':money(a.expectancy,account.currency)],

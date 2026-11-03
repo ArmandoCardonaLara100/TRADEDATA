@@ -7,6 +7,7 @@ import {createClient} from '@supabase/supabase-js';
 const base=process.env.TEST_BASE_URL||'http://localhost:3000';
 const origin={Origin:base};
 const credentials={email:`qa-${Date.now()}@example.test`,password:randomBytes(24).toString('base64url'),name:'QA Workspace'};
+const ownCapitalAccount=(name:string,initialBalance='1000',breakEvenBand='15')=>({name,initialBalance,breakEvenBand,currency:'USD',accountType:'own_capital' as const,currentPhase:null,rules:[]});
 let owner:APIRequestContext,outsider:APIRequestContext,accountId:string,tradeId:string;
 const testUserIds:string[]=[];
 const admin=createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.SUPABASE_TEST_SECRET_KEY!,{auth:{persistSession:false,autoRefreshToken:false}});
@@ -63,7 +64,7 @@ test('authenticated parity, validation, isolated access and conflicting edits',a
  expect((await outsider.delete(`/api/accounts/${accountId}`)).status()).toBe(404);
  expect((await owner.post('/api/accounts',{headers:{Origin:'https://untrusted.example'},data:{name:'CSRF',initialBalance:'100'}})).status()).toBe(403);
  expect((await owner.post('/api/trades',{data:{accountId,pnl:'NaN'}})).status()).toBe(422);
- const account=await (await owner.post('/api/accounts',{data:{name:'Lifecycle test',initialBalance:'1000',breakEvenBand:'10'}})).json();
+ const account=await (await owner.post('/api/accounts',{data:ownCapitalAccount('Lifecycle test','1000','10')})).json();
  const created=await owner.post('/api/trades',{data:{accountId:account.id,symbol:'TEST',pnl:'100',riskPercent:'.01',rewardRisk:'2'}});
  // Decimal input requires a leading zero.
  expect(created.status()).toBe(422);
@@ -72,16 +73,59 @@ test('authenticated parity, validation, isolated access and conflicting edits',a
  expect((await owner.patch(`/api/trades/${trade.id}`,{data:{accountId:account.id,pnl:'200',version:1},timeout:10000})).status()).toBe(409);
  expect((await outsider.delete(`/api/trades/${trade.id}?version=2`)).status()).toBe(409);
  const balance=await (await owner.get(`/api/workspace?accountId=${account.id}`)).json();expect(balance.analytics.balance).toBe(1150);
- const renamed=await owner.patch(`/api/accounts/${account.id}`,{data:{name:'Renamed lifecycle account',initialBalance:'1000',currency:account.currency,breakEvenBand:'10'}});
+ const renamed=await owner.patch(`/api/accounts/${account.id}`,{data:ownCapitalAccount('Renamed lifecycle account','1000','10')});
  expect(renamed.status(),await renamed.text()).toBe(200);expect((await renamed.json()).id).toBe(account.id);
- expect((await outsider.patch(`/api/accounts/${account.id}`,{data:{name:'Intrusion',initialBalance:'1000',currency:'USD',breakEvenBand:'10'}})).status()).toBe(404);
+ expect((await outsider.patch(`/api/accounts/${account.id}`,{data:ownCapitalAccount('Intrusion','1000','10')})).status()).toBe(404);
  const afterRename=await (await owner.get(`/api/workspace?accountId=${account.id}`)).json();
  expect(afterRename.account).toMatchObject({id:account.id,name:'Renamed lifecycle account'});expect(afterRename.analytics.balance).toBe(1150);expect(afterRename.recent[0].id).toBe(trade.id);
  expect((await owner.delete(`/api/trades/${trade.id}?version=2`)).status()).toBe(200);expect((await owner.delete(`/api/accounts/${account.id}`)).status()).toBe(200);
  const other=await (await outsider.get('/api/workspace')).json();expect(other.accounts).toHaveLength(0);
 });
+test('account types, independent challenge phases, editing and rule summaries work end to end',async({page})=>{
+ const state=await owner.storageState();await page.context().addCookies(state.cookies);await page.goto('/dashboard');
+ await page.getByRole('button',{name:'Create trading account',exact:true}).click();
+ const dialog=page.getByRole('dialog');await dialog.getByLabel('Account name').fill('E2E Challenge');await dialog.getByLabel('Account type').selectOption('challenge');
+ await dialog.getByLabel('Initial balance').fill('100000');await dialog.getByLabel('Break-even band').fill('0');await dialog.getByLabel('Number of phases').fill('3');await dialog.getByLabel('Current phase').selectOption('2');
+ for(const [index,target,max,daily] of [[0,'8','10','5'],[1,'5','9','4'],[2,'4','8','3']] as const){
+  await dialog.getByLabel('Profit target').nth(index).fill(target);await dialog.getByLabel('Max loss limit').nth(index).fill(max);await dialog.getByLabel('Daily loss limit').nth(index).fill(daily);
+ }
+ for(const width of [320,768,1366]){await page.setViewportSize({width,height:900});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);}
+ await dialog.getByLabel('Drawdown type').nth(1).selectOption('trailing');await dialog.getByRole('button',{name:'Create account',exact:true}).click();await expect(page.getByText('Trading account created.')).toBeVisible();
+ const challengeId=await page.getByLabel('Trading account',{exact:true}).inputValue();
+ const createdWorkspace=await (await owner.get(`/api/workspace?accountId=${challengeId}`)).json();
+ expect(createdWorkspace.account).toMatchObject({id:challengeId,name:'E2E Challenge',accountType:'challenge',currentPhase:2});
+ expect(createdWorkspace.account.rules.map((rule:{phaseNumber:number;profitTarget:string})=>[rule.phaseNumber,rule.profitTarget])).toEqual([[1,'8.00000000'],[2,'5.00000000'],[3,'4.00000000']]);
+ const operation=await owner.post('/api/trades',{data:{accountId:challengeId,symbol:'TYPE/USD',pnl:'250'}});expect(operation.status(),await operation.text()).toBe(201);
+ await page.reload();await expect(page.getByText('Challenge Account',{exact:true}).first()).toBeVisible();await expect(page.getByText('Phase 2',{exact:true}).first()).toBeVisible();await expect(page.getByText('5.00%',{exact:true}).first()).toBeVisible();
+ await page.goto('/statistics');await expect(page.getByText('Challenge Account',{exact:true}).first()).toBeVisible();await expect(page.getByText('Phase 2',{exact:true}).first()).toBeVisible();
+ await page.getByRole('button',{name:'Edit trading account: E2E Challenge'}).click();const edit=page.getByRole('dialog');await edit.getByLabel('Account type').selectOption('funded');await expect(edit.locator('.account-rule-card')).toHaveCount(1);await expect(edit.getByLabel('Number of phases')).toHaveCount(0);
+ await edit.getByLabel('Profit').fill('6');await edit.getByLabel('Max loss limit').fill('10');await edit.getByLabel('Daily loss limit').fill('5');await edit.getByLabel('Drawdown type').selectOption('trailing');await edit.getByRole('button',{name:'Save account',exact:true}).click();await expect(page.getByText('Trading account updated.')).toBeVisible();
+ const fundedWorkspace=await (await owner.get(`/api/workspace?accountId=${challengeId}`)).json();expect(fundedWorkspace.account).toMatchObject({id:challengeId,accountType:'funded',currentPhase:null});expect(fundedWorkspace.account.rules).toHaveLength(1);expect(fundedWorkspace.account.rules[0]).toMatchObject({phaseNumber:null,profitTarget:'6.00000000',drawdownType:'trailing'});expect(fundedWorkspace.recent[0].symbol).toBe('TYPE/USD');
+ expect((await outsider.patch(`/api/accounts/${challengeId}`,{data:{...ownCapitalAccount('Intrusion'),accountType:'demo'}})).status()).toBe(404);
+ const createdIds:string[]=[];for(const accountType of ['own_capital','demo'] as const){const response=await owner.post('/api/accounts',{data:{...ownCapitalAccount(`E2E ${accountType}`),accountType}});expect(response.status(),await response.text()).toBe(201);createdIds.push((await response.json()).id);}
+ await page.getByLabel('Language').selectOption('es');await expect(page.getByText('Cuenta Fondeada',{exact:true}).first()).toBeVisible();await expect(page.getByText('Reglas de la cuenta',{exact:true})).toBeVisible();await page.getByLabel('Idioma').selectOption('en');
+ for(const width of [320,768,1366]){await page.setViewportSize({width,height:900});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);}
+ expect((await owner.get(`/api/report?accountId=${challengeId}&month=2026-11&lang=en`)).status()).toBe(200);
+ await owner.patch('/api/preferences',{data:{theme:'dark',accountId}});for(const id of [...createdIds,challengeId])expect((await owner.delete(`/api/accounts/${id}`)).status()).toBe(200);
+});
+test('News stays authenticated and renders localized high-impact provider data responsively',async({page,request})=>{
+ expect((await request.get('/api/news?date=2026-11-02&timezone=UTC')).status()).toBe(401);
+ const providerResponse=await owner.get('/api/news?date=2026-11-02&timezone=UTC');expect(providerResponse.status()).toBe(process.env.TRADING_ECONOMICS_API_KEY?200:503);
+ const state=await owner.storageState();await page.context().addCookies(state.cookies);
+ await page.route('**/api/news?*',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({status:'ok',timezone:'America/Mexico_City',checkedAt:'2026-11-02T15:00:00Z',fetchedAt:'2026-11-02T15:00:00Z',providerUpdatedAt:'2026-11-02T14:01:00Z',events:[
+  {id:'397194',dateUtc:'2026-11-02T14:00:00.000Z',event:'ISM Manufacturing PMI',category:'Business Confidence',country:'United States',countryCode:'US',currency:'USD',impact:3,previous:'54.5',forecast:'54.2',actual:null,reference:'Oct',providerUpdatedAt:'2026-11-02T14:01:00.000Z'},
+  {id:'397195',dateUtc:'2026-11-02T13:30:00.000Z',event:'Employment Change',category:'Labour',country:'Canada',countryCode:'CA',currency:'CAD',impact:3,previous:'8K',forecast:'10K',actual:'12K',reference:'Oct',providerUpdatedAt:'2026-11-02T13:31:00.000Z'},
+ ]})}));
+ await page.goto('/news');await expect(page.getByRole('heading',{name:'High-impact economic news'})).toBeVisible();await expect(page.getByText('ISM Manufacturing PMI')).toBeVisible();await expect(page.getByText('12K',{exact:true})).toBeVisible();await expect(page.locator('.news-event')).toHaveCount(2);
+ await page.getByLabel('Currency').selectOption('CAD');await expect(page.locator('.news-event')).toHaveCount(1);await expect(page.getByText('Employment Change')).toBeVisible();await page.getByLabel('Currency').selectOption('all');
+ await page.getByLabel('Country').selectOption('United States');await expect(page.locator('.news-event')).toHaveCount(1);await expect(page.getByText('—',{exact:true})).toBeVisible();
+ await page.getByLabel('Language').selectOption('es');await expect(page.getByRole('heading',{name:'Noticias económicas de alto impacto'})).toBeVisible();await expect(page.getByRole('link',{name:'Noticias',exact:true})).toBeVisible();await expect(page.getByLabel('País')).toBeVisible();
+ for(const theme of ['light','dark','system']){await page.getByLabel('Tema de color').selectOption(theme);expect(['light','dark']).toContain(await page.getAttribute('html','data-theme'));}
+ for(const width of [320,768,1366]){await page.setViewportSize({width,height:900});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);}
+ const axe=await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa']).disableRules(['color-contrast']).analyze();expect(axe.violations.map(item=>item.id)).toEqual([]);
+});
 test('concurrent operation creation uses unique sequences',async()=>{
- const a=await (await owner.post('/api/accounts',{data:{name:'Concurrency test',initialBalance:'1000'}})).json();
+ const a=await (await owner.post('/api/accounts',{data:ownCapitalAccount('Concurrency test')})).json();
  const results=await Promise.all(Array.from({length:8},()=>owner.post('/api/trades',{data:{accountId:a.id,pnl:'1'}})));
  expect(results.every(r=>r.status()===201)).toBe(true);const rows=await Promise.all(results.map(r=>r.json()));expect(new Set(rows.map(t=>t.sequence)).size).toBe(8);
  expect((await owner.delete(`/api/accounts/${a.id}`)).status()).toBe(200);
@@ -90,7 +134,7 @@ test('calendar follows dated journal changes and keeps account ownership',async(
  expect((await request.get('/api/calendar?accountId=unknown&month=2026-10')).status()).toBe(401);
  expect((await outsider.get(`/api/calendar?accountId=${accountId}&month=2026-10`)).status()).toBe(404);
  expect((await owner.get(`/api/calendar?accountId=${accountId}&month=2026-13`)).status()).toBe(422);
- const account=await (await owner.post('/api/accounts',{data:{name:'Calendar test',initialBalance:'1000'}})).json();
+ const account=await (await owner.post('/api/accounts',{data:ownCapitalAccount('Calendar test')})).json();
  const create=async(pnl:string)=>{
   const response=await owner.post('/api/trades',{data:{accountId:account.id,date:'2026-10-05',symbol:'TEST',pnl}});
   expect(response.status(),await response.text()).toBe(201);
@@ -107,6 +151,7 @@ test('calendar follows dated journal changes and keeps account ownership',async(
  expect((await owner.patch('/api/preferences',{data:{theme:'dark',accountId:account.id}})).status()).toBe(200);
  const state=await owner.storageState();await page.context().addCookies(state.cookies);
  await page.goto('/calendar');
+ await page.getByLabel('Choose month').evaluate((element)=>{const input=element as HTMLInputElement;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')?.set?.call(input,'2026-10');input.dispatchEvent(new Event('input',{bubbles:true}));});
  await expect(page.getByRole('heading',{name:'October 2026'})).toBeVisible();
  const day=page.getByRole('button',{name:/October 5, 2026.*2 operations.*\+\$60\.00/});
  await expect(day).toBeVisible();await day.click();
@@ -145,7 +190,7 @@ test('calendar follows dated journal changes and keeps account ownership',async(
  expect((await owner.delete(`/api/accounts/${account.id}`)).status()).toBe(200);
 });
 test('trade date, four private evidence slots, Quick Look, and PDF persist',async({page})=>{
- const created=await owner.post('/api/accounts',{data:{name:'Review fields test',initialBalance:'10000'}});
+ const created=await owner.post('/api/accounts',{data:ownCapitalAccount('Review fields test','10000')});
  expect(created.status(),await created.text()).toBe(201);
  const account=await created.json();
  const evidenceLinks=['https://example.com/chart-2','','https://example.com/chart-4'];
@@ -190,7 +235,7 @@ test('trade date, four private evidence slots, Quick Look, and PDF persist',asyn
  expect((await owner.delete(`/api/accounts/${account.id}`)).status()).toBe(200);
 });
 test('secure public trade sharing exposes only the allowlist and revokes immediately',async({page,request})=>{
- const account=await (await owner.post('/api/accounts',{data:{name:'Never expose this account',initialBalance:'10000',breakEvenBand:'15'}})).json();
+ const account=await (await owner.post('/api/accounts',{data:ownCapitalAccount('Never expose this account','10000','15')})).json();
  const created=await owner.post('/api/trades',{data:{accountId:account.id,date:'2026-10-28',symbol:'SHARE/USD',pnl:'150',riskPercent:'0.01',rewardRisk:'1.55',duration:'15',strategy:'New York Reversal',setupGrade:'A+',mindset:'neutral',notes:'Public analysis note',feelings:'Public mindset note',tags:'PRIVATE-TAG-DO-NOT-SHARE',evidenceUrl:'https://private.example.test/chart'}});
  expect(created.status(),await created.text()).toBe(201);const trade=await created.json();
  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/f2kAAAAASUVORK5CYII=','base64');
@@ -321,7 +366,7 @@ test('numeric inputs stay natural, account deletion refreshes safely, and the br
  await page.getByText('Capital & reproducibility').click();
  for(const value of ['1000','1000.75']){await page.getByLabel('Starting balance ($)').fill(value);await expect(page.getByLabel('Starting balance ($)')).toHaveValue(value);}
 
- const created=await (await owner.post('/api/accounts',{data:{name:'Deletion UI test',initialBalance:'1000.00000000',breakEvenBand:'12.50000000'}})).json();
+ const created=await (await owner.post('/api/accounts',{data:ownCapitalAccount('Deletion UI test','1000.00000000','12.50000000')})).json();
  await page.goto('/settings');await page.getByLabel('Edit Deletion UI test').click();
  await expect(page.getByLabel('Initial balance')).toHaveValue('1000');await expect(page.getByLabel('Break-even band')).toHaveValue('12.5');
  await page.getByRole('button',{name:'Cancel',exact:true}).click();
@@ -339,7 +384,7 @@ test('numeric inputs stay natural, account deletion refreshes safely, and the br
 });
 
 test('deleting the last trading account keeps the session and shows the empty state',async({page})=>{
- const only=await (await outsider.post('/api/accounts',{data:{name:'Only account',initialBalance:'1000'}})).json();
+ const only=await (await outsider.post('/api/accounts',{data:ownCapitalAccount('Only account')})).json();
  const state=await outsider.storageState();await page.context().addCookies(state.cookies);await page.goto('/dashboard');
  await expect(page.getByLabel('Trading account',{exact:true})).toHaveValue(only.id);
  await page.getByRole('button',{name:'Delete trading account: Only account'}).first().click();await page.getByRole('button',{name:'Delete account',exact:true}).click();
@@ -348,7 +393,7 @@ test('deleting the last trading account keeps the session and shows the empty st
 });
 
 test('a failed trading-account deletion leaves the account available',async({page})=>{
- const created=await (await owner.post('/api/accounts',{data:{name:'Deletion failure test',initialBalance:'1000'}})).json();
+ const created=await (await owner.post('/api/accounts',{data:ownCapitalAccount('Deletion failure test')})).json();
  const state=await owner.storageState();await page.context().addCookies(state.cookies);await page.goto('/dashboard');await page.getByLabel('Trading account',{exact:true}).selectOption(created.id);
  await page.route(`**/api/accounts/${created.id}`,route=>route.fulfill({status:500,contentType:'application/json',body:JSON.stringify({error:'Internal details'})}));
  await page.getByRole('button',{name:'Delete trading account: Deletion failure test'}).first().click();await page.getByRole('button',{name:'Delete account',exact:true}).click();

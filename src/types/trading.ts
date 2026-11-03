@@ -1,4 +1,10 @@
 export type Outcome = 'win' | 'loss' | 'breakeven' | 'open';
+export type AccountType = 'challenge' | 'funded' | 'own_capital' | 'demo';
+export type DrawdownType = 'static' | 'trailing';
+export interface AccountRule {
+ phaseNumber: number | null; profitTarget: string; maxLossLimit: string;
+ dailyLossLimit: string; drawdownType: DrawdownType;
+}
 export interface Trade {
  id: string; accountId: string; sequence: number; date: string | null;
  symbol: string; riskPercent: string | null; rewardRisk: string | null;
@@ -11,6 +17,7 @@ export interface TradingAccount {
  id: string; name: string; currency: string; initialBalance: string;
  breakEvenBand: string; sourceSheet: string | null; baselineBreakEven: boolean;
  riskMetric: 'planned' | 'average-win'; createdAt: string;
+ accountType: AccountType | null; currentPhase: number | null; rules: AccountRule[];
 }
 export interface SimulationInput {
  winProbability: number; rewardRisk: number; riskPercent: number;

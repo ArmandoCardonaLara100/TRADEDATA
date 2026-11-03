@@ -3,7 +3,28 @@ const decimal = (min:number,max:number)=>z.union([z.string().trim().min(1).regex
 const nullableDecimal=(min:number,max:number)=>z.preprocess(v=>v===''||v===undefined?null:v,decimal(min,max).nullable());
 const optionalText=(max:number)=>z.string().trim().max(max).default('');
 const evidenceLink=z.union([z.literal(''),z.url().max(2048).refine(v=>['https:','http:'].includes(new URL(v).protocol),'Use an HTTP or HTTPS link.')]);
-export const accountSchema=z.object({name:z.string().trim().min(1).max(80),currency:z.enum(['USD','EUR','GBP','MXN']).default('USD'),initialBalance:decimal(0.01,1e12),breakEvenBand:decimal(0,1e9).default('15')});
+const accountRuleSchema=z.object({
+ phaseNumber:z.number().int().min(1).max(20).nullable(),
+ profitTarget:decimal(0.01,100),maxLossLimit:decimal(0.01,100),dailyLossLimit:decimal(0.01,100),
+ drawdownType:z.enum(['static','trailing']),
+}).refine(rule=>Number(rule.dailyLossLimit)<=Number(rule.maxLossLimit),{path:['dailyLossLimit'],message:'Daily loss cannot exceed the maximum loss limit.'});
+export const accountIdentitySchema=z.object({
+ name:z.string().trim().min(1).max(80),currency:z.enum(['USD','EUR','GBP','MXN']).default('USD'),
+ initialBalance:decimal(0.01,1e12),breakEvenBand:decimal(0,1e9).default('15'),
+});
+export const accountSchema=accountIdentitySchema.extend({
+ accountType:z.enum(['challenge','funded','own_capital','demo']),
+ currentPhase:z.number().int().min(1).max(20).nullable().default(null),rules:z.array(accountRuleSchema).max(20).default([]),
+}).superRefine((account,context)=>{
+ if(account.accountType==='challenge'){
+  if(!account.rules.length)context.addIssue({code:'custom',path:['rules'],message:'Add at least one challenge phase.'});
+  if(account.currentPhase===null||account.currentPhase>account.rules.length)context.addIssue({code:'custom',path:['currentPhase'],message:'Choose a valid current phase.'});
+  account.rules.forEach((rule,index)=>{if(rule.phaseNumber!==index+1)context.addIssue({code:'custom',path:['rules',index,'phaseNumber'],message:'Challenge phases must be sequential.'});});
+ }else if(account.accountType==='funded'){
+  if(account.rules.length!==1||account.rules[0]?.phaseNumber!==null)context.addIssue({code:'custom',path:['rules'],message:'Funded accounts require one rule set.'});
+  if(account.currentPhase!==null)context.addIssue({code:'custom',path:['currentPhase'],message:'Funded accounts do not have challenge phases.'});
+ }else if(account.rules.length||account.currentPhase!==null)context.addIssue({code:'custom',path:['rules'],message:'Rules do not apply to this account type.'});
+});
 export const tradeSchema=z.object({
  accountId:z.string().uuid(),sequence:z.number().int().min(1).max(1e7).optional(),
  date:z.preprocess(v=>v===''||v===undefined?null:v,z.iso.date().nullable()),
