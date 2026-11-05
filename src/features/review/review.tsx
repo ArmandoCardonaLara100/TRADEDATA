@@ -7,6 +7,7 @@ import {Button, ErrorMessage, Field, PageHeading, Panel} from '@/components/ui';
 import {api, message} from '@/lib/client';
 import {useLanguage, type MessageKey} from '@/lib/i18n';
 import type {ReviewSubmission, ReviewWorkspace} from '@/types/reviews';
+import {useAnalyticsView} from '@/lib/analytics/client';
 
 const statusKey:Record<ReviewSubmission['status'],MessageKey>={
   pending:'review.pending',
@@ -19,6 +20,7 @@ function reviewDate(value:string,language:'en'|'es') {
 }
 
 export function Review({initial,viewerId}:{initial:ReviewWorkspace;viewerId:string}) {
+  useAnalyticsView('review','review_viewed');
   const {language,t}=useLanguage();
   const [reviews,setReviews]=useState(initial.reviews);
   const [busy,setBusy]=useState(false);

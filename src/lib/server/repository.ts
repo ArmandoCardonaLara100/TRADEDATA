@@ -151,7 +151,12 @@ export async function saveTrade(userId:string,raw:unknown,id?:string){
 export async function removeTrade(userId:string,id:string,version:number){
  const db=await supabaseServer(),{data,error}=await db.from('trades').delete().eq('user_id',userId).eq('id',id).eq('version',version).select('id,evidencePath,additionalEvidencePaths');
  check(error);if(!data?.length)throw new HttpError(409,'This operation changed or was removed. Refresh and try again.');
- const paths=allEvidencePaths(data[0]);if(paths.length)await db.storage.from(EVIDENCE_BUCKET).remove(paths);
+ return allEvidencePaths(data[0]);
+}
+export async function removeEvidenceFiles(paths:string[]){
+ if(!paths.length)return;
+ const db=await supabaseServer(),{error}=await db.storage.from(EVIDENCE_BUCKET).remove(paths);
+ if(error)console.error('Evidence cleanup failed:',error.message);
 }
 export async function saveScenario(userId:string,raw:unknown){
  const data=scenarioSchema.parse(raw),db=await supabaseServer();
@@ -176,17 +181,17 @@ export async function importWorkbook(parsed:ReturnType<typeof parseWorkbook>){
  check(result.error);return result.data;
 }
 export async function isReviewAdmin(userId:string){
- const db=await supabaseServer(),{data,error}=await db.from('user_roles').select('role').eq('user_id',userId).eq('role','review_admin').maybeSingle();
+ const db=await supabaseServer(),{data,error}=await db.from('user_roles').select('role').eq('user_id',userId).in('role',['review_admin','admin']).maybeSingle();
  check(error);return Boolean(data);
 }
 export async function getReviewWorkspace(userId:string):Promise<ReviewWorkspace>{
  const db=await supabaseServer();
- const [reviews,admin]=await Promise.all([
-  db.from('review_submissions').select('*').order('submitted_at',{ascending:false}),
-  isReviewAdmin(userId),
- ]);
+ const roleResult=await db.from('user_roles').select('role').eq('user_id',userId).maybeSingle();check(roleResult.error);
+ const legacyModerator=roleResult.data?.role==='review_admin';
+ const query=db.from('review_submissions').select('*').order('submitted_at',{ascending:false});
+ const reviews=legacyModerator?await query:await query.eq('user_id',userId);
  check(reviews.error);
- return {reviews:(reviews.data||[]).map(reviewDto),isAdmin:admin};
+ return {reviews:(reviews.data||[]).map(reviewDto),isAdmin:legacyModerator};
 }
 export async function getApprovedReviews(){
  const db=await supabaseServer(),{data,error}=await db.from('review_submissions').select('*').eq('status','approved').order('approved_at',{ascending:false}).limit(6);

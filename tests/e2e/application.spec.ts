@@ -8,25 +8,27 @@ const base=process.env.TEST_BASE_URL||'http://localhost:3000';
 const origin={Origin:base};
 const credentials={email:`qa-${Date.now()}@example.test`,password:randomBytes(24).toString('base64url'),name:'QA Workspace'};
 const ownCapitalAccount=(name:string,initialBalance='1000',breakEvenBand='15')=>({name,initialBalance,breakEvenBand,currency:'USD',accountType:'own_capital' as const,currentPhase:null,rules:[]});
-let owner:APIRequestContext,outsider:APIRequestContext,accountId:string,tradeId:string;
+let owner:APIRequestContext,outsider:APIRequestContext,fullAdmin:APIRequestContext,accountId:string,tradeId:string;
 const testUserIds:string[]=[];
 const admin=createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.SUPABASE_TEST_SECRET_KEY!,{auth:{persistSession:false,autoRefreshToken:false}});
 test.beforeAll(async({playwright})=>{
- for(const email of [credentials.email,`other-${credentials.email}`]){
+ for(const email of [credentials.email,`other-${credentials.email}`,`admin-${credentials.email}`]){
   const {data,error}=await admin.auth.admin.createUser({email,password:credentials.password,email_confirm:true,user_metadata:{name:credentials.name}});
-  if(error)throw new Error(`Test user provisioning failed: ${error.code}`);
+  if(error)throw new Error(`Test user provisioning failed: ${error.code||error.message}`);
   testUserIds.push(data.user.id);
  }
- owner=await playwright.request.newContext({baseURL:base,extraHTTPHeaders:origin});outsider=await playwright.request.newContext({baseURL:base,extraHTTPHeaders:origin});
+ owner=await playwright.request.newContext({baseURL:base,extraHTTPHeaders:origin});outsider=await playwright.request.newContext({baseURL:base,extraHTTPHeaders:origin});fullAdmin=await playwright.request.newContext({baseURL:base,extraHTTPHeaders:origin});
  const a=await owner.post('/api/auth/sign-in/email',{data:credentials});expect(a.status(),await a.text()).toBe(200);
  const b=await outsider.post('/api/auth/sign-in/email',{data:{...credentials,email:`other-${credentials.email}`}});expect(b.status(),await b.text()).toBe(200);
+ const c=await fullAdmin.post('/api/auth/sign-in/email',{data:{...credentials,email:`admin-${credentials.email}`}});expect(c.status(),await c.text()).toBe(200);
+ const role=await admin.from('user_roles').upsert({user_id:testUserIds[2],role:'admin'});expect(role.error).toBeNull();
  const file=process.env.SOURCE_WORKBOOK?await readFile(process.env.SOURCE_WORKBOOK):workbookFixture();
  const response=await owner.post('/api/import',{multipart:{file:{name:'Trading Web.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:file}}});expect(response.status(),await response.text()).toBe(201);const result=await response.json();accountId=result.imported[1].id;
  const pref=await owner.patch('/api/preferences',{data:{theme:'dark',accountId}});expect(pref.status()).toBe(200);
  tradeId=(await (await owner.get(`/api/trades?accountId=${accountId}`)).json()).trades[0].id;
 });
 test.afterAll(async()=>{
- await owner?.dispose();await outsider?.dispose();
+ await owner?.dispose();await outsider?.dispose();await fullAdmin?.dispose();
  if(testUserIds.length){
   const {data,error}=await admin.from('trades').select('evidencePath,additionalEvidencePaths').in('user_id',testUserIds);if(error)throw new Error(`Test evidence lookup failed: ${error.code}`);
   const paths=(data||[]).flatMap(row=>[row.evidencePath,...(row.additionalEvidencePaths||[])]).filter(Boolean);
@@ -34,6 +36,7 @@ test.afterAll(async()=>{
  }
  // An approved review references its moderator, so remove test reviews before test users.
  if(testUserIds.length){const {error}=await admin.from('review_submissions').delete().in('user_id',testUserIds);if(error)throw new Error(`Test review cleanup failed: ${error.code}`);}
+ if(testUserIds.length){const {error}=await admin.from('review_moderation_audit').delete().in('actor_user_id',testUserIds);if(error)throw new Error(`Test audit cleanup failed: ${error.code}`);}
  for(const id of testUserIds){const {error}=await admin.auth.admin.deleteUser(id);if(error)throw new Error(`Test user cleanup failed: ${error.message}`);}
 });
 test('hosted Supabase RLS isolates users without application filtering',async()=>{
@@ -54,6 +57,32 @@ test('hosted Supabase RLS isolates users without application filtering',async()=
  const otherWrite=await otherClient.from('trading_accounts').delete().eq('id',own.data!.id).select();expect(otherWrite.error).toBeNull();expect(otherWrite.data).toEqual([]);
  await client.from('trading_accounts').delete().eq('id',own.data!.id);await otherClient.auth.signOut({scope:'local'});
  await client.auth.signOut({scope:'local'});
+});
+test('full admin dashboard is role-gated, aggregate-only, localized and responsive',async({page,request})=>{
+ expect((await request.get('/api/admin')).status()).toBe(401);
+ expect((await outsider.get('/api/admin')).status()).toBe(403);
+ const reviewRole=await admin.from('user_roles').upsert({user_id:testUserIds[0],role:'review_admin'});expect(reviewRole.error).toBeNull();
+ expect((await owner.get('/api/admin')).status()).toBe(403);
+ const clearRole=await admin.from('user_roles').delete().eq('user_id',testUserIds[0]);expect(clearRole.error).toBeNull();
+ for(const [feature,eventName,metadata={}] of [['overview','overview_viewed'],['trading_journal','journal_viewed'],['statistics','statistics_viewed'],['calendar','calendar_day_opened'],['monte_carlo','simulation_run',{simulation_size:100}],['funded_accounts','funded_accounts_viewed'],['news','news_filter_changed',{filter_name:'currency'}],['review','review_viewed']] as const)expect((await owner.post('/api/analytics/events',{data:{feature,eventName,metadata}})).status()).toBe(204);
+ const review=await owner.post('/api/reviews',{data:{reviewText:'Admin dashboard moderation test.'}});expect(review.status(),await review.text()).toBe(201);
+ const rejectedReview=await outsider.post('/api/reviews',{data:{reviewText:'Admin dashboard rejection test.'}});expect(rejectedReview.status(),await rejectedReview.text()).toBe(201);
+ const response=await fullAdmin.get('/api/admin?range=30d&userPage=1&reviewStatus=pending&reviewPage=1');expect(response.status(),await response.text()).toBe(200);
+ const payload=await response.json();expect(payload.kpis.totalUsers).toBeGreaterThanOrEqual(3);expect(payload.kpis.weeklyActiveUsers).toBeGreaterThanOrEqual(1);expect(payload.features).toHaveLength(9);expect(payload.featureTimeline.some((point:{feature:string})=>point.feature==='monte_carlo')).toBe(true);expect(payload.features.find((feature:{feature:string})=>feature.feature==='overview').distinct_users).toBeGreaterThanOrEqual(1);
+ const serialized=JSON.stringify(payload);expect(serialized).not.toContain(credentials.email);expect(serialized).not.toContain(testUserIds[0]);
+ const client=createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,{auth:{persistSession:false,autoRefreshToken:false}});expect((await client.auth.signInWithPassword({email:`admin-${credentials.email}`,password:credentials.password})).error).toBeNull();const raw=await client.from('analytics_events').select('*');expect(raw.error).not.toBeNull();expect(raw.data).toBeNull();await client.auth.signOut({scope:'local'});
+ const normalState=await owner.storageState();await page.context().addCookies(normalState.cookies);await page.goto('/admin');await expect(page).toHaveURL(/\/admin$/);await expect(page.getByRole('heading',{name:'This page isn’t here'})).toBeVisible();
+ await page.context().clearCookies();const state=await fullAdmin.storageState();await page.context().addCookies(state.cookies);await page.goto('/admin');await expect(page.getByRole('heading',{name:'Admin dashboard'})).toBeVisible();await expect(page.getByRole('link',{name:'Admin',exact:true})).toBeVisible();await expect(page.getByText('Most used tool')).toBeVisible();
+ await page.getByRole('tab',{name:/Analytics/}).click();await expect(page.getByText('Feature usage over time')).toBeVisible();
+ await page.getByRole('tab',{name:/Reviews/}).click();await expect(page.getByLabel('Status')).toHaveValue('pending');await expect(page.getByText('Admin dashboard moderation test.')).toBeVisible();await page.locator('.admin-review-card').filter({hasText:'Admin dashboard moderation test.'}).getByRole('button',{name:'Approve',exact:true}).click();await expect(page.getByText('Review status updated.')).toBeVisible();
+ await page.locator('.admin-review-card').filter({hasText:'Admin dashboard rejection test.'}).getByRole('button',{name:'Reject',exact:true}).click();await expect(page.getByText('Review status updated.')).toBeVisible();
+ const audit=await admin.from('review_moderation_audit').select('action').in('action',['approved','rejected']);expect(audit.error).toBeNull();expect(new Set(audit.data?.map(item=>item.action))).toEqual(new Set(['approved','rejected']));
+ await page.getByLabel('Language').selectOption('es');await expect(page.getByRole('heading',{name:'Panel de administración'})).toBeVisible();await expect(page.getByRole('link',{name:'Administración',exact:true})).toBeVisible();await expect(page.getByText('Estado de la reseña actualizado.')).toBeVisible();
+ for(const theme of ['light','dark','system']){await page.getByLabel('Tema de color').selectOption(theme);expect(['light','dark']).toContain(await page.getAttribute('html','data-theme'));}
+ await page.getByRole('tab',{name:'Resumen'}).click();
+ for(const width of [320,768,1366]){await page.setViewportSize({width,height:900});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);if(width===320)await page.screenshot({path:'.data/admin-mobile.png',fullPage:true});if(width===1366)await page.screenshot({path:'.data/admin-desktop.png',fullPage:true});}
+ await page.getByRole('tab',{name:'Analítica'}).click();await page.screenshot({path:'.data/admin-analytics-desktop.png',fullPage:true});
+ const axe=await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa']).disableRules(['color-contrast']).analyze();expect(axe.violations.map(item=>item.id)).toEqual([]);
 });
 test('authenticated parity, validation, isolated access and conflicting edits',async({request})=>{
  expect((await request.get('/api/workspace')).status()).toBe(401);

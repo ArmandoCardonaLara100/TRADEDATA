@@ -9,8 +9,10 @@ import {api,message} from '@/lib/client';
 import {TradeTable} from './trade-table';
 import {TradeDialog,TradeDetails} from './trade-dialog';
 import type {Trade} from '@/types/trading';
+import {useAnalyticsView} from '@/lib/analytics/client';
 type Result={trades:Trade[];total:number;page:number;pageSize:number};
 export function Journal(){
+ useAnalyticsView('trading_journal','journal_viewed');
  const {account}=useWorkspace(),{t}=useLanguage();const [awareness,setAwareness]=useState(false),[phrase,setPhrase]=useState(-1);
  const startRecording=()=>{setPhrase(previous=>(previous+1+Math.floor(Math.random()*7))%8);setAwareness(true);};
  const continueRecording=()=>{setAwareness(false);setNewTrade(true);};const [search,setSearch]=useState(''),[query,setQuery]=useState(''),[outcome,setOutcome]=useState('all'),[sort,setSort]=useState('sequence'),[direction,setDirection]=useState('desc'),[from,setFrom]=useState(''),[to,setTo]=useState(''),[page,setPage]=useState(1),[filters,setFilters]=useState(false),[showContext,setShowContext]=useState(true);

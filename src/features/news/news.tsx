@@ -4,6 +4,7 @@ import {AlertTriangle,CalendarDays,ChevronLeft,ChevronRight,Clock3,Globe2,Refres
 import {Button,Empty,PageHeading,Panel} from '@/components/ui';
 import {useLanguage} from '@/lib/i18n';
 import type {EconomicCalendarResponse,EconomicEvent} from '@/types/news';
+import {trackAnalytics,useAnalyticsView} from '@/lib/analytics/client';
 
 const shift=(date:string,days:number)=>{const value=new Date(`${date}T12:00:00Z`);value.setUTCDate(value.getUTCDate()+days);return value.toISOString().slice(0,10);};
 function localDate(timeZone:string){
@@ -11,6 +12,7 @@ function localDate(timeZone:string){
  return `${part('year')}-${part('month')}-${part('day')}`;
 }
 export function News(){
+ useAnalyticsView('news','news_viewed');
  const {t,language}=useLanguage(),locale=language==='es'?'es-MX':'en-US';
  const [timeZone,setTimeZone]=useState(''),[date,setDate]=useState(''),[data,setData]=useState<EconomicCalendarResponse|null>(null),[loading,setLoading]=useState(true),[error,setError]=useState(false),[refresh,setRefresh]=useState(0),[currency,setCurrency]=useState('all'),[country,setCountry]=useState('all');
  useEffect(()=>{const zone=Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC';setTimeZone(zone);setDate(localDate(zone));},[]);
@@ -20,6 +22,8 @@ export function News(){
   return()=>{active=false;controller.abort();};
  },[date,timeZone,refresh]);
  useEffect(()=>{setCurrency('all');setCountry('all');},[date]);
+ useEffect(()=>{if(currency!=='all')trackAnalytics('news','news_filter_changed',{filter_name:'currency'});},[currency]);
+ useEffect(()=>{if(country!=='all')trackAnalytics('news','news_filter_changed',{filter_name:'country'});},[country]);
  useEffect(()=>{if(!date||!timeZone||date!==localDate(timeZone))return;const timer=window.setInterval(()=>{if(document.visibilityState==='visible')setRefresh(value=>value+1);},5*60_000);return()=>window.clearInterval(timer);},[date,timeZone]);
  const currencies=useMemo(()=>[...new Set((data?.events||[]).map(event=>event.currency))].sort(),[data]);
  const countries=useMemo(()=>[...new Set((data?.events||[]).map(event=>event.country))].sort(),[data]);

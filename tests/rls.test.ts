@@ -3,11 +3,11 @@ import {readFile,readdir} from 'node:fs/promises';
 import {beforeAll,afterAll,expect,test} from 'vitest';
 
 const db=new PGlite();
-const a='11111111-1111-4111-8111-111111111111',b='22222222-2222-4222-8222-222222222222';
+const a='11111111-1111-4111-8111-111111111111',b='22222222-2222-4222-8222-222222222222',c='33333333-3333-4333-8333-333333333333';
 let accountId:string;
 beforeAll(async()=>{
  await db.exec(`create role anon; create role authenticated;
- create schema auth; create table auth.users(id uuid primary key);
+ create schema auth; create table auth.users(id uuid primary key,created_at timestamptz not null default now(),banned_until timestamptz);
  create schema storage;
  create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);
  create table storage.objects(bucket_id text,name text,primary key(bucket_id,name));
@@ -18,7 +18,7 @@ beforeAll(async()=>{
  create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
  grant usage on schema auth,public to authenticated,anon;
  grant execute on function auth.uid() to authenticated,anon;
- insert into auth.users values ('${a}'),('${b}');`);
+ insert into auth.users(id) values ('${a}'),('${b}'),('${c}');`);
  const dir=new URL('../supabase/migrations/',import.meta.url);
  for(const file of (await readdir(dir)).filter(f=>f.endsWith('.sql')).sort())await db.exec(await readFile(new URL(file,dir),'utf8'));
 });
@@ -162,4 +162,40 @@ test('reviews stay pending until a different authorized moderator approves them'
   expect((await db.query(`update review_submissions set status='approved' where id=$1 returning id`,[own.rows[0].id])).rows).toHaveLength(0);
  });
  await asUser(b,async()=>expect((await db.query<{status:string}>('select status from review_submissions where id=$1',[reviewId!])).rows[0].status).toBe('approved'));
+});
+test('analytics are append-only through the validated RPC and raw events remain private',async()=>{
+ await asUser(b,async()=>{
+  await db.query("select record_analytics_event('overview','overview_viewed','{}'::jsonb)");
+  await db.query("select record_analytics_event('news','news_filter_changed','{\"filter_name\":\"currency\"}'::jsonb)");
+  await expect(db.query('select * from analytics_events')).rejects.toThrow(/permission denied/);
+  await expect(db.query("insert into analytics_events(user_id,feature,event_name) values($1,'overview','overview_viewed')",[b])).rejects.toThrow(/permission denied/);
+  await expect(db.query("select record_analytics_event('overview','overview_viewed','{\"private_note\":\"no\"}'::jsonb)")).rejects.toThrow(/Unsupported analytics metadata key/);
+  await expect(db.query("select record_analytics_event('news','news_filter_changed','{\"filter_name\":\"private trade note\"}'::jsonb)")).rejects.toThrow(/Invalid analytics filter metadata/);
+  await expect(db.query("select record_analytics_event('monte_carlo','simulation_run','{\"simulation_size\":1001}'::jsonb)")).rejects.toThrow(/Invalid analytics simulation metadata/);
+ });
+ await db.exec('set role anon');
+ try{await expect(db.query("select record_analytics_event('overview','overview_viewed','{}')")).rejects.toThrow(/permission denied/);}finally{await db.exec('reset role');}
+});
+test('full-admin analytics are database-aggregated and denied to users and review admins',async()=>{
+ await db.query('insert into user_roles(user_id,role) values($1,$2)',[c,'admin']);
+ await db.query('insert into profiles(id,name) values($1,$2)',[c,'Full Admin']);
+ await asUser(b,async()=>await expect(db.query("select get_admin_dashboard('30d',1,'all',1)")).rejects.toThrow(/Administrator access required/));
+ await asUser(a,async()=>await expect(db.query("select get_admin_dashboard('30d',1,'all',1)")).rejects.toThrow(/Administrator access required/));
+ await asUser(c,async()=>{
+  const result=await db.query<{get_admin_dashboard:{kpis:{totalUsers:number;weeklyActiveUsers:number};features:unknown[];featureTimeline:unknown[];users:{items:Array<Record<string,unknown>>}}}>("select get_admin_dashboard('30d',1,'all',1)");
+  expect(result.rows[0].get_admin_dashboard.kpis.totalUsers).toBe(3);
+  expect(result.rows[0].get_admin_dashboard.kpis.weeklyActiveUsers).toBeGreaterThanOrEqual(1);
+  expect(result.rows[0].get_admin_dashboard.features).toHaveLength(9);
+  expect(result.rows[0].get_admin_dashboard.featureTimeline.length).toBeGreaterThanOrEqual(1);
+  expect(result.rows[0].get_admin_dashboard.users.items.every(user=>!('id' in user)&&!('email' in user))).toBe(true);
+ });
+});
+test('full admins can moderate other users while review admins remain compatible',async()=>{
+ let reviewId:string;
+ await asUser(b,async()=>{reviewId=(await db.query<{id:string}>("insert into review_submissions(user_id,reviewer_name,review_text) values($1,'Ignored','Admin workflow') returning id",[b])).rows[0].id;});
+ await asUser(c,async()=>{
+  const updated=await db.query<{status:string}>("update review_submissions set status='approved' where id=$1 returning status",[reviewId!]);
+  expect(updated.rows[0].status).toBe('approved');
+  await expect(db.query('select * from review_moderation_audit')).rejects.toThrow(/permission denied/);
+ });
 });

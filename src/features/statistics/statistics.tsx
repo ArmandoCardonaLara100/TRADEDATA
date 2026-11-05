@@ -6,9 +6,11 @@ import {money,number,percent,signedMoney} from '@/lib/format';
 import {useWorkspace} from '@/features/workspace/context';
 import {useLanguage,type MessageKey} from '@/lib/i18n';
 import {AccountRulesSummary,accountTypeKey} from '@/features/workspace/account-rules-summary';
+import {useAnalyticsView} from '@/lib/analytics/client';
 
 function Stats({title,rows}:{title:string;rows:[string,string][]}){return <Panel title={title}><dl className="stat-list">{rows.map(([label,value])=><div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl><div style={{height:15}}/></Panel>}
 export function Statistics(){
+ useAnalyticsView('statistics','statistics_viewed');
  const {account,analytics:a}=useWorkspace(),{t}=useLanguage();
  if(!account||!a)return <><PageHeading eyebrow={t('page.statisticsEyebrow')} title={t('page.statisticsTitle')}/><Panel><Empty title={t('statistics.noData')} description={t('statistics.noDataText')} action={<Link href="/dashboard" className="button primary">{t('statistics.openOverview')}</Link>}/></Panel></>;
  const cash=(value:number|null)=>money(value,account.currency),band=Number(account.breakEvenBand),trades=(count:number)=>`${count} ${t('statistics.trades')}`;

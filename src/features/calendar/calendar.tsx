@@ -11,6 +11,7 @@ import {D} from '@/lib/calculations/decimal';
 import {api} from '@/lib/client';
 import {number, signedMoney} from '@/lib/format';
 import {useLanguage, type MessageKey} from '@/lib/i18n';
+import {trackAnalytics,useAnalyticsView} from '@/lib/analytics/client';
 import {useWorkspace} from '@/features/workspace/context';
 import type {Trade} from '@/types/trading';
 
@@ -51,6 +52,7 @@ function formattedDate(date:string, locale:string) {
 }
 
 export function Calendar() {
+  useAnalyticsView('calendar','calendar_viewed');
   const {account} = useWorkspace();
   const {language,t} = useLanguage();
   const locale = language==='es'?'es-MX':'en-US';
@@ -123,7 +125,7 @@ export function Calendar() {
             if(!date)return <div className="calendar-spacer" key={`spacer-${index}`} aria-hidden="true"/>;
             const day=days.get(date);
             const label=`${formattedDate(date,locale)}. ${day?`${day.trades.length} ${t('calendar.operations')}. ${dayAmount(day)}`:t('calendar.noTrades')}`;
-            return day?<button type="button" key={date} className={`calendar-day ${day.state}`} aria-label={label} onClick={()=>setSelectedDate(date)}>
+            return day?<button type="button" key={date} className={`calendar-day ${day.state}`} aria-label={label} onClick={()=>{setSelectedDate(date);trackAnalytics('calendar','calendar_day_opened');}}>
               <span className={`calendar-day-number ${date===todayKey?'today':''}`}>{Number(date.slice(-2))}</span>
               <span className="calendar-day-result">{day.closed?dayAmount(day):t('calendar.incomplete')}</span>
               <span className="calendar-day-count">{day.trades.length} {t('calendar.tradesShort')}</span>

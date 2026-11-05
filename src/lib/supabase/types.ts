@@ -627,7 +627,15 @@ export type Database = {
       }
     }
     Functions: {
+      get_admin_dashboard: {
+        Args: { p_range?: string; p_review_page?: number; p_review_status?: string; p_user_page?: number }
+        Returns: Json
+      }
       import_workbook: { Args: { p_sheets: Json }; Returns: Json }
+      record_analytics_event: {
+        Args: { p_event_name: string; p_feature: string; p_metadata?: Json }
+        Returns: undefined
+      }
       save_trade: { Args: { p_data: Json; p_id?: string }; Returns: Json }
       save_trading_account: {
         Args: { p_data: Json; p_id?: string }
