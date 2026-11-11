@@ -75,8 +75,9 @@ async function providerFetch(category:NewsCategory,page:number,limit=PAGE_SIZE){
  return body;
 }
 async function retrieve(category:NewsCategory,page:number):Promise<NewsData>{
- const body=await providerFetch(category,page),articles=body.slice(0,PAGE_SIZE)
+ const body=await providerFetch(category,page),normalized=body.slice(0,PAGE_SIZE)
   .map((item,index)=>normalizeMarketNewsArticle(item,category,index)).filter((item):item is MarketNewsArticle=>Boolean(item));
+ const articles=[...new Map(normalized.map(article=>[article.articleUrl,article])).values()];
  if(body.length&&articles.length===0)throw new Error(`FMP ${category} response contained no valid articles.`);
  return {articles,fetchedAt:new Date().toISOString(),hasMore:body.length===PAGE_SIZE};
 }

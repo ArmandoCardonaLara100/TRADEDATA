@@ -103,9 +103,8 @@ export function TradeDialog({open,onOpenChange,trade,onPersisted,onSaved}:{open:
    <div className="form-grid">
     <InstrumentField initialValue={record?.symbol||''}/>
     <Field label={t('journal.tradeDate')} hint={t('journal.tradeDateHint')}><input name="date" type="date" defaultValue={record?record.date||'':localTradeDate()}/></Field>
-    <Field label={t('journal.tradeTime')} hint={t('journal.tradeTimeHint')}><input name="tradeTime" type="time" step="60" defaultValue={record?.tradeTime?.slice(0,5)||localTradeTime()}/></Field>
     <Field label={`${t('journal.grossResult')} (${account?.currency||'USD'})`} hint={t('journal.grossResultHint')}><input name="grossPnl" type="number" step="0.00000001" max="1000000000000" min="-1000000000000" placeholder={t('journal.netResultPlaceholder')} value={grossInput} onChange={event=>setGrossInput(event.target.value)}/></Field>
-    <Field label={`${t('journal.commission')} (${account?.currency||'USD'})`} hint={t('journal.commissionHint')}><input name="commission" type="number" step="0.00000001" max="1000000000000" min="-1000000000000" placeholder="—" value={commissionInput} onChange={event=>setCommissionInput(event.target.value)}/></Field>
+    <Field label={`${t('journal.commission')} (${account?.currency||'USD'})`} hint={t('journal.commissionHint')}><input name="commission" type="number" step="0.00000001" max="1000000000000" min="-1000000000000" placeholder="-" value={commissionInput} onChange={event=>setCommissionInput(event.target.value)}/></Field>
     <Field label={`${t('journal.netResult')} (${account?.currency||'USD'})`} hint={t('journal.netResultFormula')}><output className={`net-result-preview ${netPreview&&Number(netPreview)<0?'negative':netPreview?'positive':''}`}>{netPreview?number(Number(netPreview)):'—'}</output></Field>
     <Field label={t('journal.riskPercent')}><input name="riskPercent" type="number" min="0" max="100" step="0.000001" placeholder="1.00" defaultValue={record?.riskPercent?numericInputValue(record.riskPercent,100):''}/></Field>
     <Field label={t('journal.plannedR')}><input name="rewardRisk" type="number" min="0" max="1000" step="0.00000001" placeholder="2.50" defaultValue={numericInputValue(record?.rewardRisk)}/></Field>
@@ -114,6 +113,7 @@ export function TradeDialog({open,onOpenChange,trade,onPersisted,onSaved}:{open:
    <details className="form-details" open={Boolean(record?.notes||record?.strategy||record?.mindset||hasEvidence)}>
     <summary>{t('journal.context')}</summary>
     <div className="form-grid context-grid">
+     <Field label={t('journal.tradeTime')} hint={t('journal.tradeTimeHint')}><input name="tradeTime" type="time" step="60" defaultValue={record?.tradeTime?.slice(0,5)||localTradeTime()}/></Field>
      <Field label={t('journal.strategy')}><input name="strategy" maxLength={80} defaultValue={record?.strategy||''} placeholder={t('journal.strategyPlaceholder')}/></Field>
      <Field label={t('journal.grade')}><select name="setupGrade" defaultValue={record?.setupGrade||''}><option value="">{t('journal.unspecified')}</option>{['A+','A','B+','B'].map(grade=><option key={grade} value={grade}>{grade}</option>)}</select></Field>
      <Field label={t('journal.session')}><select name="session" defaultValue={record?.session||''}><option value="">{t('journal.unspecified')}</option>{['Asia','London','New York','Other'].map(x=><option key={x}>{x}</option>)}</select></Field>
