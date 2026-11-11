@@ -13,6 +13,7 @@ const dashboardSchema=z.object({
  users:z.object({page:z.number(),pageSize:z.number(),total:z.number(),items:z.array(z.object({name:z.string(),createdAt:z.string(),role:z.enum(['user','review_admin','admin']),lastActivity:z.string().nullable(),accountCount:z.number(),tradeCount:z.number(),status:z.enum(['active','inactive','blocked'])}))}),
  reviews:z.object({page:z.number(),pageSize:z.number(),total:z.number(),status:z.enum(['all','pending','approved','rejected']),items:z.array(z.object({id:z.string().uuid(),reviewerName:z.string(),reviewText:z.string(),status:z.enum(['pending','approved','rejected']),submittedAt:z.string(),approvedAt:z.string().nullable(),isOwn:z.boolean()}))}),
 });
+const newsSchema=z.object({views:z.number(),articleOpens:z.number(),uniqueReaders:z.number(),engagementPercent:z.number(),categories:z.array(z.object({category:z.enum(['latest','stocks','forex','crypto']),opens:z.number()}))});
 
 export async function userRole(userId:string){
  const db=await supabaseServer(),result=await db.from('user_roles').select('role').eq('user_id',userId).maybeSingle();
@@ -23,6 +24,6 @@ export async function requireFullAdmin(userId:string){if(!await isFullAdmin(user
 
 export async function getAdminDashboard(range:AdminRange='30d',userPage=1,reviewStatus:AdminReviewStatus='pending',reviewPage=1):Promise<AdminDashboardData>{
  const db=await supabaseServer();
- const result=await db.rpc('get_admin_dashboard',{p_range:range,p_user_page:userPage,p_review_status:reviewStatus,p_review_page:reviewPage});
- check(result.error);return dashboardSchema.parse(result.data) as AdminDashboardData;
+ const [result,newsResult]=await Promise.all([db.rpc('get_admin_dashboard',{p_range:range,p_user_page:userPage,p_review_status:reviewStatus,p_review_page:reviewPage}),db.rpc('get_admin_news_analytics',{p_range:range})]);
+ check(result.error);check(newsResult.error);return {...dashboardSchema.parse(result.data),news:newsSchema.parse(newsResult.data)} as AdminDashboardData;
 }

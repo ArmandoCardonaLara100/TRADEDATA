@@ -42,7 +42,7 @@ test.afterAll(async()=>{
 test('hosted Supabase RLS isolates users without application filtering',async()=>{
  const client=createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,{auth:{persistSession:false,autoRefreshToken:false}});
  const {error:loginError}=await client.auth.signInWithPassword({email:`other-${credentials.email}`,password:credentials.password});expect(loginError).toBeNull();
- for(const table of ['trading_accounts','trades','trade_shares','account_records','trade_records']){
+ for(const table of ['trading_accounts','trades','trade_shares','saved_instruments','account_records','trade_records']){
   const {data,error}=await client.from(table).select('*').eq('user_id',testUserIds[0]);expect(error).toBeNull();expect(data).toEqual([]);
  }
  const stolen=await client.from('trades').insert({user_id:testUserIds[1],accountId,sequence:9999,pnl:99});expect(stolen.error?.code).toBe('23503');
@@ -65,14 +65,15 @@ test('full admin dashboard is role-gated, aggregate-only, localized and responsi
  expect((await owner.get('/api/admin')).status()).toBe(403);
  const clearRole=await admin.from('user_roles').delete().eq('user_id',testUserIds[0]);expect(clearRole.error).toBeNull();
  for(const [feature,eventName,metadata={}] of [['overview','overview_viewed'],['trading_journal','journal_viewed'],['statistics','statistics_viewed'],['calendar','calendar_day_opened'],['monte_carlo','simulation_run',{simulation_size:100}],['funded_accounts','funded_accounts_viewed'],['news','news_filter_changed',{filter_name:'currency'}],['review','review_viewed']] as const)expect((await owner.post('/api/analytics/events',{data:{feature,eventName,metadata}})).status()).toBe(204);
+ for(const [eventName,metadata] of [['news_viewed',{}],['news_article_opened',{category:'stocks'}]] as const)expect((await owner.post('/api/analytics/events',{data:{feature:'news',eventName,metadata}})).status()).toBe(204);
  const review=await owner.post('/api/reviews',{data:{reviewText:'Admin dashboard moderation test.'}});expect(review.status(),await review.text()).toBe(201);
  const rejectedReview=await outsider.post('/api/reviews',{data:{reviewText:'Admin dashboard rejection test.'}});expect(rejectedReview.status(),await rejectedReview.text()).toBe(201);
  const response=await fullAdmin.get('/api/admin?range=30d&userPage=1&reviewStatus=pending&reviewPage=1');expect(response.status(),await response.text()).toBe(200);
- const payload=await response.json();expect(payload.kpis.totalUsers).toBeGreaterThanOrEqual(3);expect(payload.kpis.weeklyActiveUsers).toBeGreaterThanOrEqual(1);expect(payload.features).toHaveLength(9);expect(payload.featureTimeline.some((point:{feature:string})=>point.feature==='monte_carlo')).toBe(true);expect(payload.features.find((feature:{feature:string})=>feature.feature==='overview').distinct_users).toBeGreaterThanOrEqual(1);
+ const payload=await response.json();expect(payload.kpis.totalUsers).toBeGreaterThanOrEqual(3);expect(payload.kpis.weeklyActiveUsers).toBeGreaterThanOrEqual(1);expect(payload.features).toHaveLength(9);expect(payload.featureTimeline.some((point:{feature:string})=>point.feature==='monte_carlo')).toBe(true);expect(payload.features.find((feature:{feature:string})=>feature.feature==='overview').distinct_users).toBeGreaterThanOrEqual(1);expect(payload.news.views).toBeGreaterThanOrEqual(1);expect(payload.news.articleOpens).toBeGreaterThanOrEqual(1);expect(payload.news.uniqueReaders).toBeGreaterThanOrEqual(1);expect(payload.news.categories).toContainEqual(expect.objectContaining({category:'stocks',opens:expect.any(Number)}));
  const serialized=JSON.stringify(payload);expect(serialized).not.toContain(credentials.email);expect(serialized).not.toContain(testUserIds[0]);
  const client=createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,{auth:{persistSession:false,autoRefreshToken:false}});expect((await client.auth.signInWithPassword({email:`admin-${credentials.email}`,password:credentials.password})).error).toBeNull();const raw=await client.from('analytics_events').select('*');expect(raw.error).not.toBeNull();expect(raw.data).toBeNull();await client.auth.signOut({scope:'local'});
  const normalState=await owner.storageState();await page.context().addCookies(normalState.cookies);await page.goto('/admin');await expect(page).toHaveURL(/\/admin$/);await expect(page.getByRole('heading',{name:'This page isn’t here'})).toBeVisible();
- await page.context().clearCookies();const state=await fullAdmin.storageState();await page.context().addCookies(state.cookies);await page.goto('/admin');await expect(page.getByRole('heading',{name:'Admin dashboard'})).toBeVisible();await expect(page.getByRole('link',{name:'Admin',exact:true})).toBeVisible();await expect(page.getByText('Most used tool')).toBeVisible();
+ await page.context().clearCookies();const state=await fullAdmin.storageState();await page.context().addCookies(state.cookies);await page.goto('/admin');await expect(page.getByRole('heading',{name:'Admin dashboard'})).toBeVisible();await expect(page.getByRole('link',{name:'Admin',exact:true})).toBeVisible();await expect(page.getByText('Most used tool')).toBeVisible();await expect(page.getByText('News views')).toBeVisible();await expect(page.getByText('Top news category · Stocks')).toBeVisible();
  await page.getByRole('tab',{name:/Analytics/}).click();await expect(page.getByText('Feature usage over time')).toBeVisible();
  await page.getByRole('tab',{name:/Reviews/}).click();await expect(page.getByLabel('Status')).toHaveValue('pending');await expect(page.getByText('Admin dashboard moderation test.')).toBeVisible();await page.locator('.admin-review-card').filter({hasText:'Admin dashboard moderation test.'}).getByRole('button',{name:'Approve',exact:true}).click();await expect(page.getByText('Review status updated.')).toBeVisible();
  await page.locator('.admin-review-card').filter({hasText:'Admin dashboard rejection test.'}).getByRole('button',{name:'Reject',exact:true}).click();await expect(page.getByText('Review status updated.')).toBeVisible();
@@ -93,21 +94,26 @@ test('authenticated parity, validation, isolated access and conflicting edits',a
  expect((await outsider.delete(`/api/accounts/${accountId}`)).status()).toBe(404);
  expect((await owner.post('/api/accounts',{headers:{Origin:'https://untrusted.example'},data:{name:'CSRF',initialBalance:'100'}})).status()).toBe(403);
  expect((await owner.post('/api/trades',{data:{accountId,pnl:'NaN'}})).status()).toBe(422);
+ const instrumentResponse=await owner.post('/api/instruments',{data:{name:'EUR/USD'}});expect(instrumentResponse.status(),await instrumentResponse.text()).toBe(201);const instrument=await instrumentResponse.json();expect(instrument.name).toBe('EUR/USD');
+ expect((await owner.post('/api/instruments',{data:{name:'eur/usd'}})).status()).toBe(409);
+ expect((await outsider.delete(`/api/instruments?id=${instrument.id}`)).status()).toBe(404);
+ const instrumentsWorkspace=await (await owner.get(`/api/workspace?accountId=${accountId}`)).json();expect(instrumentsWorkspace.instruments).toContainEqual(expect.objectContaining({id:instrument.id,name:'EUR/USD'}));
  const account=await (await owner.post('/api/accounts',{data:ownCapitalAccount('Lifecycle test','1000','10')})).json();
- const created=await owner.post('/api/trades',{data:{accountId:account.id,symbol:'TEST',pnl:'100',riskPercent:'.01',rewardRisk:'2'}});
+ const created=await owner.post('/api/trades',{data:{accountId:account.id,symbol:'TEST',grossPnl:'150',commission:'25',tradeTime:'09:30',riskPercent:'.01',rewardRisk:'2'}});
  // Decimal input requires a leading zero.
  expect(created.status()).toBe(422);
- const trade=await (await owner.post('/api/trades',{data:{accountId:account.id,symbol:'TEST',pnl:'100',riskPercent:'0.01',rewardRisk:'2'}})).json();expect(trade.version).toBe(1);
- const updated=await owner.patch(`/api/trades/${trade.id}`,{data:{accountId:account.id,pnl:'150',symbol:'TEST',version:1}});expect(updated.status()).toBe(200);
+ const trade=await (await owner.post('/api/trades',{data:{accountId:account.id,symbol:'TEST',grossPnl:'150',commission:'25',tradeTime:'09:30',riskPercent:'0.01',rewardRisk:'2'}})).json();expect(trade).toMatchObject({version:1,tradeTime:'09:30:00',grossPnl:'150.00000000',commission:'-25.00000000',pnl:'125.00000000'});
+ const updated=await owner.patch(`/api/trades/${trade.id}`,{data:{accountId:account.id,grossPnl:'150',commission:'-25',tradeTime:'10:45',symbol:'TEST',version:1}});expect(updated.status()).toBe(200);expect(await updated.json()).toMatchObject({version:2,tradeTime:'10:45:00',grossPnl:'150.00000000',commission:'-25.00000000',pnl:'125.00000000'});
  expect((await owner.patch(`/api/trades/${trade.id}`,{data:{accountId:account.id,pnl:'200',version:1},timeout:10000})).status()).toBe(409);
  expect((await outsider.delete(`/api/trades/${trade.id}?version=2`)).status()).toBe(409);
- const balance=await (await owner.get(`/api/workspace?accountId=${account.id}`)).json();expect(balance.analytics.balance).toBe(1150);
+ const balance=await (await owner.get(`/api/workspace?accountId=${account.id}`)).json();expect(balance.analytics).toMatchObject({balance:1125,totalGrossResult:150,totalCommissions:-25,netProfit:125});
  const renamed=await owner.patch(`/api/accounts/${account.id}`,{data:ownCapitalAccount('Renamed lifecycle account','1000','10')});
  expect(renamed.status(),await renamed.text()).toBe(200);expect((await renamed.json()).id).toBe(account.id);
  expect((await outsider.patch(`/api/accounts/${account.id}`,{data:ownCapitalAccount('Intrusion','1000','10')})).status()).toBe(404);
  const afterRename=await (await owner.get(`/api/workspace?accountId=${account.id}`)).json();
- expect(afterRename.account).toMatchObject({id:account.id,name:'Renamed lifecycle account'});expect(afterRename.analytics.balance).toBe(1150);expect(afterRename.recent[0].id).toBe(trade.id);
+ expect(afterRename.account).toMatchObject({id:account.id,name:'Renamed lifecycle account'});expect(afterRename.analytics.balance).toBe(1125);expect(afterRename.recent[0]).toMatchObject({id:trade.id,grossPnl:'150.00000000',commission:'-25.00000000',pnl:'125.00000000'});
  expect((await owner.delete(`/api/trades/${trade.id}?version=2`)).status()).toBe(200);expect((await owner.delete(`/api/accounts/${account.id}`)).status()).toBe(200);
+ expect((await owner.delete(`/api/instruments?id=${instrument.id}`)).status()).toBe(200);
  const other=await (await outsider.get('/api/workspace')).json();expect(other.accounts).toHaveLength(0);
 });
 test('account types, independent challenge phases, editing and rule summaries work end to end',async({page})=>{
@@ -137,18 +143,25 @@ test('account types, independent challenge phases, editing and rule summaries wo
  expect((await owner.get(`/api/report?accountId=${challengeId}&month=2026-11&lang=en`)).status()).toBe(200);
  await owner.patch('/api/preferences',{data:{theme:'dark',accountId}});for(const id of [...createdIds,challengeId])expect((await owner.delete(`/api/accounts/${id}`)).status()).toBe(200);
 });
-test('News stays authenticated and renders localized high-impact provider data responsively',async({page,request})=>{
- expect((await request.get('/api/news?date=2026-11-02&timezone=UTC')).status()).toBe(401);
- const providerResponse=await owner.get('/api/news?date=2026-11-02&timezone=UTC');expect(providerResponse.status()).toBe(process.env.TRADING_ECONOMICS_API_KEY?200:503);
+test('News stays authenticated and renders localized FMP market intelligence responsively',async({page,request})=>{
+ expect((await request.get('/api/news?category=latest&page=0')).status()).toBe(401);
+ const providerResponse=await owner.get('/api/news?category=latest&page=0');
+ const providerRequired=process.env.EXPECT_LIVE_NEWS==='1'||Boolean(process.env.FMP_API_KEY?.trim());
+ expect(providerResponse.status()).toBe(providerRequired?200:503);
+ if(providerRequired){
+  const providerPayload=await providerResponse.json();
+  expect(providerPayload).toMatchObject({status:expect.stringMatching(/^(ok|stale)$/),category:'latest'});
+  expect(providerPayload.articles.length).toBeGreaterThan(0);
+ }
  const state=await owner.storageState();await page.context().addCookies(state.cookies);
- await page.route('**/api/news?*',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({status:'ok',timezone:'America/Mexico_City',checkedAt:'2026-11-02T15:00:00Z',fetchedAt:'2026-11-02T15:00:00Z',providerUpdatedAt:'2026-11-02T14:01:00Z',events:[
-  {id:'397194',dateUtc:'2026-11-02T14:00:00.000Z',event:'ISM Manufacturing PMI',category:'Business Confidence',country:'United States',countryCode:'US',currency:'USD',impact:3,previous:'54.5',forecast:'54.2',actual:null,reference:'Oct',providerUpdatedAt:'2026-11-02T14:01:00.000Z'},
-  {id:'397195',dateUtc:'2026-11-02T13:30:00.000Z',event:'Employment Change',category:'Labour',country:'Canada',countryCode:'CA',currency:'CAD',impact:3,previous:'8K',forecast:'10K',actual:'12K',reference:'Oct',providerUpdatedAt:'2026-11-02T13:31:00.000Z'},
+ await page.route('**/api/news?*',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({status:'ok',category:'latest',availableCategories:['latest','stocks','forex','crypto'],checkedAt:'2026-11-02T15:00:00Z',fetchedAt:'2026-11-02T15:00:00Z',page:0,hasMore:false,articles:[
+  {id:'latest:1',title:'Markets prepare for central-bank decisions',description:'Rates and currency volatility are in focus.',publishedAt:'2026-11-02T14:00:00.000Z',source:'Financial Modeling Prep',author:'FMP Research',imageUrl:null,articleUrl:'https://financialmodelingprep.com/market-news/sample',tickers:['EURUSD'],category:'latest'},
+  {id:'latest:2',title:'Technology shares extend gains',description:'Semiconductor shares led the session.',publishedAt:'2026-11-02T13:30:00.000Z',source:'Market Source',author:null,imageUrl:null,articleUrl:'https://example.com/article',tickers:['AAPL'],category:'latest'},
  ]})}));
- await page.goto('/news');await expect(page.getByRole('heading',{name:'High-impact economic news'})).toBeVisible();await expect(page.getByText('ISM Manufacturing PMI')).toBeVisible();await expect(page.getByText('12K',{exact:true})).toBeVisible();await expect(page.locator('.news-event')).toHaveCount(2);
- await page.getByLabel('Currency').selectOption('CAD');await expect(page.locator('.news-event')).toHaveCount(1);await expect(page.getByText('Employment Change')).toBeVisible();await page.getByLabel('Currency').selectOption('all');
- await page.getByLabel('Country').selectOption('United States');await expect(page.locator('.news-event')).toHaveCount(1);await expect(page.getByText('—',{exact:true})).toBeVisible();
- await page.getByLabel('Language').selectOption('es');await expect(page.getByRole('heading',{name:'Noticias económicas de alto impacto'})).toBeVisible();await expect(page.getByRole('link',{name:'Noticias',exact:true})).toBeVisible();await expect(page.getByLabel('País')).toBeVisible();
+ await page.goto('/news');await expect(page.getByRole('heading',{name:'Market intelligence'})).toBeVisible();await expect(page.getByRole('heading',{name:'Markets prepare for central-bank decisions'})).toBeVisible();await expect(page.locator('.market-news-card')).toHaveCount(2);
+ await expect(page.getByRole('tab',{name:'Stocks'})).toBeVisible();await expect(page.getByRole('link',{name:/Read full article\s*: Markets prepare/})).toHaveAttribute('href','https://financialmodelingprep.com/market-news/sample');
+ await page.getByLabel('Search news').fill('Technology');await expect(page.locator('.market-news-card')).toHaveCount(1);await expect(page.getByRole('heading',{name:'Technology shares extend gains'})).toBeVisible();await page.getByLabel('Search news').fill('');
+ await page.getByLabel('Language').selectOption('es');await expect(page.getByRole('heading',{name:'Inteligencia de mercado'})).toBeVisible();await expect(page.getByRole('link',{name:'Noticias',exact:true})).toBeVisible();await expect(page.getByLabel('Buscar noticias')).toBeVisible();
  for(const theme of ['light','dark','system']){await page.getByLabel('Tema de color').selectOption(theme);expect(['light','dark']).toContain(await page.getAttribute('html','data-theme'));}
  for(const width of [320,768,1366]){await page.setViewportSize({width,height:900});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);}
  const axe=await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa']).disableRules(['color-contrast']).analyze();expect(axe.violations.map(item=>item.id)).toEqual([]);
@@ -218,26 +231,27 @@ test('calendar follows dated journal changes and keeps account ownership',async(
  expect((await owner.patch('/api/preferences',{data:{theme:'dark',accountId}})).status()).toBe(200);
  expect((await owner.delete(`/api/accounts/${account.id}`)).status()).toBe(200);
 });
-test('trade date, four private evidence slots, Quick Look, and PDF persist',async({page})=>{
+test('trade time, commission accounting, four private evidence slots, Quick Look, and PDF persist',async({page})=>{
  const created=await owner.post('/api/accounts',{data:ownCapitalAccount('Review fields test','10000')});
  expect(created.status(),await created.text()).toBe(201);
  const account=await created.json();
  const evidenceLinks=['https://example.com/chart-2','','https://example.com/chart-4'];
- const saved=await owner.post('/api/trades',{data:{accountId:account.id,date:'2026-10-18',symbol:'EUR/USD',pnl:'125',strategy:'Breakout',setupGrade:'A+',mindset:'fear',feelings:'Waited for confirmation.',evidenceUrl:'https://example.com/chart-1',additionalEvidenceUrls:evidenceLinks}});
+ const saved=await owner.post('/api/trades',{data:{accountId:account.id,date:'2026-10-18',tradeTime:'09:30',symbol:'EUR/USD',grossPnl:'150',commission:'25',strategy:'Breakout',setupGrade:'A+',mindset:'fear',feelings:'Waited for confirmation.',evidenceUrl:'https://example.com/chart-1',additionalEvidenceUrls:evidenceLinks}});
  expect(saved.status(),await saved.text()).toBe(201);
  const record=await saved.json();
- expect(record).toMatchObject({date:'2026-10-18',setupGrade:'A+',mindset:'fear',feelings:'Waited for confirmation.',evidenceUrl:'https://example.com/chart-1',additionalEvidenceUrls:evidenceLinks});
+ expect(record).toMatchObject({date:'2026-10-18',tradeTime:'09:30:00',grossPnl:'150.00000000',commission:'-25.00000000',pnl:'125.00000000',setupGrade:'A+',mindset:'fear',feelings:'Waited for confirmation.',evidenceUrl:'https://example.com/chart-1',additionalEvidenceUrls:evidenceLinks});
  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/f2kAAAAASUVORK5CYII=','base64');
  for(const slot of [1,4]){const upload=await owner.post(`/api/trades/${record.id}/evidence?slot=${slot}`,{multipart:{image:{name:`chart-${slot}.png`,mimeType:'image/png',buffer:png}}});expect(upload.status(),await upload.text()).toBe(200);}
  for(const slot of [1,4]){const image=await owner.get(`/api/trades/${record.id}/evidence?slot=${slot}`);expect(image.status()).toBe(200);expect(image.headers()['content-type']).toContain('image/png');expect(await image.body()).toEqual(png);expect((await outsider.get(`/api/trades/${record.id}/evidence?slot=${slot}`)).status()).toBe(404);}
  expect((await owner.get(`/api/trades/${record.id}/evidence?slot=5`)).status()).toBe(422);
  const stored=await (await owner.get(`/api/trades?accountId=${account.id}`)).json();
- expect(stored.trades[0]).toMatchObject({date:'2026-10-18',setupGrade:'A+',mindset:'fear',feelings:'Waited for confirmation.',evidenceUrl:'https://example.com/chart-1',additionalEvidenceUrls:evidenceLinks});
+ expect(stored.trades[0]).toMatchObject({date:'2026-10-18',tradeTime:'09:30:00',grossPnl:'150.00000000',commission:'-25.00000000',pnl:'125.00000000',setupGrade:'A+',mindset:'fear',feelings:'Waited for confirmation.',evidenceUrl:'https://example.com/chart-1',additionalEvidenceUrls:evidenceLinks});
  expect(stored.trades[0].evidencePath).toContain(`${testUserIds[0]}/${record.id}/`);
  expect(stored.trades[0].additionalEvidencePaths[2]).toContain(`${testUserIds[0]}/${record.id}/4-`);
  expect((await owner.patch('/api/preferences',{data:{theme:'dark',accountId:account.id}})).status()).toBe(200);
  const state=await owner.storageState();await page.context().addCookies(state.cookies);await page.goto('/journal');
  await page.getByRole('button',{name:`View operation ${record.sequence}`}).click();
+ const details=page.getByRole('dialog');const definitions=details.locator('dd');await expect(definitions.filter({hasText:'09:30'})).toBeVisible();await expect(definitions.filter({hasText:'+$150.00'})).toBeVisible();await expect(definitions.filter({hasText:'-$25.00'})).toBeVisible();await expect(definitions.filter({hasText:'+$125.00'})).toBeVisible();
  const fourthPreview=page.getByRole('button',{name:'Open evidence preview 4'});await expect(fourthPreview).toBeVisible();await fourthPreview.click();
  await expect(page.getByRole('button',{name:'Close evidence preview'})).toBeVisible();await page.keyboard.press('Escape');await expect(fourthPreview).toBeFocused();
  await fourthPreview.click();await page.getByRole('button',{name:'Close evidence preview'}).click();await expect(fourthPreview).toBeFocused();
@@ -252,9 +266,9 @@ test('trade date, four private evidence slots, Quick Look, and PDF persist',asyn
  expect(report.status(),await report.text()).toBe(200);expect(report.headers()['content-type']).toContain('application/pdf');
  const pdf=await report.body();expect(pdf.subarray(0,5).toString()).toBe('%PDF-');
  expect((pdf.toString('latin1').match(/\/Type \/Page\b/g)||[]).length).toBeGreaterThanOrEqual(5);
- const edited=await owner.patch(`/api/trades/${record.id}`,{data:{accountId:account.id,date:'2026-10-17',symbol:'EUR/USD',pnl:'125',setupGrade:'B+',mindset:'neutral',feelings:'Followed the plan.',version:record.version}});
+ const edited=await owner.patch(`/api/trades/${record.id}`,{data:{accountId:account.id,date:'2026-10-17',tradeTime:'10:15',symbol:'EUR/USD',grossPnl:'145',commission:'20',setupGrade:'B+',mindset:'neutral',feelings:'Followed the plan.',version:record.version}});
  expect(edited.status(),await edited.text()).toBe(200);
- expect(await edited.json()).toMatchObject({date:'2026-10-17',setupGrade:'B+',mindset:'neutral',feelings:'Followed the plan.',additionalEvidenceUrls:evidenceLinks});
+ expect(await edited.json()).toMatchObject({date:'2026-10-17',tradeTime:'10:15:00',grossPnl:'145.00000000',commission:'-20.00000000',pnl:'125.00000000',setupGrade:'B+',mindset:'neutral',feelings:'Followed the plan.',additionalEvidenceUrls:evidenceLinks});
  const moved=await (await owner.get(`/api/calendar?accountId=${account.id}&month=2026-10`)).json();expect(moved.trades[0].date).toBe('2026-10-17');
  expect((await owner.delete(`/api/trades/${record.id}/evidence?slot=4`)).status()).toBe(200);
  expect((await owner.get(`/api/trades/${record.id}/evidence?slot=4`)).status()).toBe(404);expect((await owner.get(`/api/trades/${record.id}/evidence?slot=1`)).status()).toBe(200);
@@ -265,7 +279,7 @@ test('trade date, four private evidence slots, Quick Look, and PDF persist',asyn
 });
 test('secure public trade sharing exposes only the allowlist and revokes immediately',async({page,request})=>{
  const account=await (await owner.post('/api/accounts',{data:ownCapitalAccount('Never expose this account','10000','15')})).json();
- const created=await owner.post('/api/trades',{data:{accountId:account.id,date:'2026-10-28',symbol:'SHARE/USD',pnl:'150',riskPercent:'0.01',rewardRisk:'1.55',duration:'15',strategy:'New York Reversal',setupGrade:'A+',mindset:'neutral',notes:'Public analysis note',feelings:'Public mindset note',tags:'PRIVATE-TAG-DO-NOT-SHARE',evidenceUrl:'https://private.example.test/chart'}});
+ const created=await owner.post('/api/trades',{data:{accountId:account.id,date:'2026-10-28',tradeTime:'09:30',symbol:'SHARE/USD',grossPnl:'160',commission:'10',riskPercent:'0.01',rewardRisk:'1.55',duration:'15',strategy:'New York Reversal',setupGrade:'A+',mindset:'neutral',notes:'Public analysis note',feelings:'Public mindset note',tags:'PRIVATE-TAG-DO-NOT-SHARE',evidenceUrl:'https://private.example.test/chart'}});
  expect(created.status(),await created.text()).toBe(201);const trade=await created.json();
  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/f2kAAAAASUVORK5CYII=','base64');
  const upload=await owner.post(`/api/trades/${trade.id}/evidence?slot=1`,{multipart:{image:{name:'shared-chart.png',mimeType:'image/png',buffer:png}}});expect(upload.status(),await upload.text()).toBe(200);
@@ -279,7 +293,7 @@ test('secure public trade sharing exposes only the allowlist and revokes immedia
  await page.context().grantPermissions(['clipboard-read','clipboard-write']);await page.getByRole('button',{name:'Copy link',exact:true}).click();await expect(page.getByText('Link copied',{exact:true})).toBeVisible();
  const token=new URL(url).pathname.split('/').pop()!;expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);expect(token).not.toContain(trade.id);
  const publicResponse=await request.get(url);expect(publicResponse.status(),await publicResponse.text()).toBe(200);const html=await publicResponse.text();
- for(const allowed of ['SHARE/USD','Public analysis note','Public mindset note','New York Reversal'])expect(html).toContain(allowed);
+ for(const allowed of ['SHARE/USD','Public analysis note','Public mindset note','New York Reversal','09:30','+$160.00','-$10.00','+$150.00'])expect(html).toContain(allowed);
  for(const secret of [credentials.email,testUserIds[0],account.id,account.name,trade.id,'PRIVATE-TAG-DO-NOT-SHARE','private.example.test'])expect(html).not.toContain(secret);
  const evidence=await request.get(`/api/share/${token}/evidence?slot=1`);expect(evidence.status()).toBe(200);expect(evidence.headers()['cache-control']).toContain('no-store');expect(await evidence.body()).toEqual(png);
  expect((await request.get(`/api/share/${token}/evidence?slot=2`)).status()).toBe(404);
@@ -347,7 +361,7 @@ test('login, import parity, journal filters, editing, saving and deletion throug
  await page.setViewportSize({width:1440,height:900});
  const today=await page.evaluate(()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;});
  await expect(page.getByLabel('Trade date')).toHaveValue(today);
- await page.getByLabel('Trade date').fill('2026-10-17');await page.getByLabel('Instrument',{exact:true}).fill('QA/USD');await page.getByLabel('Net result (USD)').fill('125');await page.getByLabel('Risk per trade (%)').fill('1');await page.getByLabel('Planned reward / risk (R)').fill('2');
+ await page.getByLabel('Trade date').fill('2026-10-17');await page.getByLabel('Instrument',{exact:true}).fill('QA/USD');await page.getByLabel('Gross result (USD)').fill('125');await page.getByLabel('Risk per trade (%)').fill('1');await page.getByLabel('Planned reward / risk (R)').fill('2');
  await page.getByLabel('Setup grade').selectOption('A+');await page.getByLabel('Mindset & execution').selectOption('fear');await page.getByLabel('Mindset note (optional)').fill('Waited for the setup.');
  await expect(page.getByLabel('Strategy / setup')).toHaveCount(1);
  await expect(page.getByLabel('Direction')).toBeVisible();await page.getByLabel('Direction').selectOption('long');
@@ -364,7 +378,7 @@ test('login, import parity, journal filters, editing, saving and deletion throug
  });
  await expect(page.getByAltText('Selected evidence image 1')).toBeVisible();
  await page.getByRole('button',{name:'Record operation',exact:true}).last().click();await expect(page.getByRole('dialog')).not.toBeVisible();
- await page.getByLabel('Search operations').fill('QA/USD');await page.getByText('QA/USD',{exact:true}).click();await expect(page.getByText('Waited for the setup.')).toBeVisible();await expect(page.getByText('Long',{exact:true})).toBeVisible();await expect(page.getByAltText('Trade evidence screenshot')).toBeVisible();for(const index of [1,2,3,4])await expect(page.getByRole('link',{name:`Open trade evidence ${index}`})).toBeVisible();await page.getByRole('button',{name:'Edit operation',exact:true}).click();await expect(page.getByLabel('Direction')).toHaveValue('long');await page.getByLabel('Direction').selectOption('short');for(const [index,path] of [[1,'one'],[2,'two'],[3,'three'],[4,'four']] as const)await expect(page.getByLabel(`Evidence link ${index}`)).toHaveValue(`https://example.com/${path}`);await page.getByLabel('Net result (USD)').fill('150');await page.getByRole('button',{name:'Save changes',exact:true}).click();await expect(page.getByText('+$150.00',{exact:true})).toBeVisible();
+ await page.getByLabel('Search operations').fill('QA/USD');await page.getByText('QA/USD',{exact:true}).click();await expect(page.getByText('Waited for the setup.')).toBeVisible();await expect(page.getByText('Long',{exact:true})).toBeVisible();await expect(page.getByAltText('Trade evidence screenshot')).toBeVisible();for(const index of [1,2,3,4])await expect(page.getByRole('link',{name:`Open trade evidence ${index}`})).toBeVisible();await page.getByRole('button',{name:'Edit operation',exact:true}).click();await expect(page.getByLabel('Direction')).toHaveValue('long');await page.getByLabel('Direction').selectOption('short');for(const [index,path] of [[1,'one'],[2,'two'],[3,'three'],[4,'four']] as const)await expect(page.getByLabel(`Evidence link ${index}`)).toHaveValue(`https://example.com/${path}`);await page.getByLabel('Gross result (USD)').fill('150');await page.getByRole('button',{name:'Save changes',exact:true}).click();await expect(page.getByText('+$150.00',{exact:true})).toBeVisible();
  await page.reload();await expect(page.getByText('+$150.00',{exact:true})).toBeVisible();await page.getByText('QA/USD',{exact:true}).click();await expect(page.getByText('Short',{exact:true})).toBeVisible();await page.getByLabel('Close dialog').click();
  await page.getByRole('link',{name:'Monte Carlo',exact:true}).click();await expect(page.getByText('Possible account paths')).toBeVisible();await expect(page.locator('.simulation-chart svg')).toBeVisible();
  await page.getByRole('button',{name:'Save',exact:true}).click();await page.getByLabel('Scenario name').fill('Verified simulation');await page.getByRole('button',{name:'Save scenario',exact:true}).click();await expect(page.getByText('Scenario saved to your workspace.')).toBeVisible();
@@ -372,7 +386,7 @@ test('login, import parity, journal filters, editing, saving and deletion throug
  await page.getByRole('button',{name:'Save',exact:true}).click();await page.getByLabel('Scenario name').fill('Verified bankroll');await page.getByRole('button',{name:'Save scenario',exact:true}).click();await expect(page.getByRole('dialog')).not.toBeVisible();
  await page.reload();await page.getByRole('button',{name:'Saved scenarios',exact:true}).click();await page.getByRole('button',{name:/^Verified bankroll/}).click();await expect(page.getByLabel('Cost per account ($)')).toHaveValue('30');await expect(page.getByText('$90.00',{exact:true})).toBeVisible();
  expect(errors).toEqual([]);await page.getByRole('button',{name:'Log out'}).click();await expect(page).toHaveURL(base+'/');await page.goto('/journal');await expect(page).toHaveURL(/login/);
- await page.getByLabel('Email address').fill(credentials.email);await page.getByLabel('Password',{exact:true}).fill(credentials.password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page).toHaveURL(/dashboard/);await page.goto('/journal');await page.getByLabel('Search operations').fill('QA/USD');await page.getByText('QA/USD',{exact:true}).click();await expect(page.getByText('Short',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Delete operation',exact:true}).click();await page.getByRole('button',{name:'Delete operation',exact:true}).click();await page.goto('/dashboard');await expect(page.getByText('$6,352.00',{exact:true})).toBeVisible();
+ await page.getByLabel('Email address').fill(credentials.email);await page.getByLabel('Password',{exact:true}).fill(credentials.password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page).toHaveURL(/dashboard/);await page.goto('/journal');await page.getByLabel('Search operations').fill('QA/USD');await page.getByText('QA/USD',{exact:true}).click();await expect(page.getByText('Short',{exact:true})).toBeVisible();const storedEvidence=page.getByAltText('Trade evidence screenshot');await expect(storedEvidence).toHaveJSProperty('complete',true);await expect.poll(()=>storedEvidence.evaluate(image=>(image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);await page.getByRole('button',{name:'Delete operation',exact:true}).click();await page.getByRole('button',{name:'Delete operation',exact:true}).click();await page.goto('/dashboard');await expect(page.getByText('$6,352.00',{exact:true})).toBeVisible();
  for(const path of ['/statistics','/calendar','/review','/settings']){await page.goto(path);await expect(page.locator('main#main')).toBeVisible();}
  expect(errors).toEqual([]);
 });

@@ -32,19 +32,21 @@ test('RLS protects every user table, views, ownership reassignment and foreign a
   const result=await db.query<{id:string}>(`insert into trading_accounts(user_id,name,"initialBalance") values ($1,'Owner A','6000.12345678') returning id`,[a]);accountId=result.rows[0].id;
   await db.query('insert into profiles(id,name) values($1,$2)',[a,'A']);
   await db.query('insert into strategies(user_id,name) values($1,$2)',[a,'A strategy']);
+  await db.query('insert into saved_instruments(user_id,name) values($1,$2)',[a,'EUR/USD']);
   await db.query("insert into scenarios(user_id,name,kind,input) values($1,'A scenario','bankroll','{}')",[a]);
   await db.query('insert into preferences(user_id,"selectedAccountId") values($1,$2)',[a,accountId]);
   await db.query('select save_trade($1::jsonb)',[JSON.stringify({accountId,pnl:'0.12345678'})]);
   expect((await db.query<{initialBalance:string}>('select "initialBalance" from account_records')).rows[0].initialBalance).toBe('6000.12345678');
  });
  await asUser(b,async()=>{
-  for(const table of ['profiles','trading_accounts','trades','trade_shares','strategies','scenarios','preferences','account_records','trade_records']){
+  for(const table of ['profiles','trading_accounts','trades','trade_shares','saved_instruments','strategies','scenarios','preferences','account_records','trade_records']){
    expect((await db.query('select * from '+table)).rows).toHaveLength(0);
   }
   expect((await db.query('update trading_accounts set name=$1 where id=$2 returning id',['Intrusion',accountId])).rows).toHaveLength(0);
   expect((await db.query('delete from trading_accounts where id=$1 returning id',[accountId])).rows).toHaveLength(0);
   await expect(db.query('insert into trading_accounts(user_id,name,"initialBalance") values($1,$2,100)',[a,'Forged'])).rejects.toThrow(/row-level security/);
   await expect(db.query('insert into trades(user_id,"accountId",sequence) values($1,$2,2)',[b,accountId])).rejects.toThrow(/foreign key/);
+  await expect(db.query('insert into saved_instruments(user_id,name) values($1,$2)',[a,'FORGED'])).rejects.toThrow(/row-level security/);
   await expect(db.query('select save_trade($1::jsonb)',[JSON.stringify({accountId,pnl:'999'})])).rejects.toThrow(/Account not found/);
  });
  await asUser(a,async()=>{
@@ -82,6 +84,15 @@ test('trade updates reject stale versions and return precise money',async()=>{
   const updated=await db.query<{save_trade:{version:number}}>('select save_trade($1::jsonb,$2)',[JSON.stringify({accountId,pnl:'123.45',version:1}),row.id]);
   expect(updated.rows[0].save_trade.version).toBe(2);
   await expect(db.query('select save_trade($1::jsonb,$2)',[JSON.stringify({accountId,pnl:'100',version:1}),row.id])).rejects.toMatchObject({code:'PT409'});
+ });
+});
+test('gross result, commission cost and operation time are enforced at the database boundary',async()=>{
+ await asUser(a,async()=>{
+  const created=await db.query<{save_trade:{id:string;grossPnl:string;commission:string;pnl:string;tradeTime:string}}>('select save_trade($1::jsonb)',[JSON.stringify({accountId,grossPnl:'100',commission:'120',tradeTime:'09:45'})]);
+  expect(created.rows[0].save_trade).toMatchObject({grossPnl:'100.00000000',commission:'-120.00000000',pnl:'-20.00000000',tradeTime:'09:45:00'});
+  const id=created.rows[0].save_trade.id;
+  const changed=await db.query<{save_trade:{grossPnl:string;commission:string;pnl:string}}>('select save_trade($1::jsonb,$2)',[JSON.stringify({accountId,grossPnl:'150',commission:'-10',tradeTime:'10:00',version:1}),id]);
+  expect(changed.rows[0].save_trade).toMatchObject({grossPnl:'150.00000000',commission:'-10.00000000',pnl:'140.00000000'});
  });
 });
 test('grade, mindset, note, and edited Trade Date persist through the view and RPC',async()=>{
@@ -167,10 +178,13 @@ test('analytics are append-only through the validated RPC and raw events remain 
  await asUser(b,async()=>{
   await db.query("select record_analytics_event('overview','overview_viewed','{}'::jsonb)");
   await db.query("select record_analytics_event('news','news_filter_changed','{\"filter_name\":\"currency\"}'::jsonb)");
+  await db.query("select record_analytics_event('news','news_article_opened','{\"category\":\"forex\"}'::jsonb)");
+  await db.query("select record_analytics_event('trading_journal','instrument_saved','{}'::jsonb)");
   await expect(db.query('select * from analytics_events')).rejects.toThrow(/permission denied/);
   await expect(db.query("insert into analytics_events(user_id,feature,event_name) values($1,'overview','overview_viewed')",[b])).rejects.toThrow(/permission denied/);
   await expect(db.query("select record_analytics_event('overview','overview_viewed','{\"private_note\":\"no\"}'::jsonb)")).rejects.toThrow(/Unsupported analytics metadata key/);
   await expect(db.query("select record_analytics_event('news','news_filter_changed','{\"filter_name\":\"private trade note\"}'::jsonb)")).rejects.toThrow(/Invalid analytics filter metadata/);
+  await expect(db.query("select record_analytics_event('news','news_article_opened','{\"category\":\"private-note\"}'::jsonb)")).rejects.toThrow(/Invalid analytics category metadata/);
   await expect(db.query("select record_analytics_event('monte_carlo','simulation_run','{\"simulation_size\":1001}'::jsonb)")).rejects.toThrow(/Invalid analytics simulation metadata/);
  });
  await db.exec('set role anon');
@@ -188,6 +202,8 @@ test('full-admin analytics are database-aggregated and denied to users and revie
   expect(result.rows[0].get_admin_dashboard.features).toHaveLength(9);
   expect(result.rows[0].get_admin_dashboard.featureTimeline.length).toBeGreaterThanOrEqual(1);
   expect(result.rows[0].get_admin_dashboard.users.items.every(user=>!('id' in user)&&!('email' in user))).toBe(true);
+  const news=await db.query<{get_admin_news_analytics:{views:number;articleOpens:number;uniqueReaders:number;categories:{category:string;opens:number}[]}}>("select get_admin_news_analytics('30d')");
+  expect(news.rows[0].get_admin_news_analytics).toMatchObject({articleOpens:1,uniqueReaders:1,categories:[{category:'forex',opens:1}]});
  });
 });
 test('full admins can moderate other users while review admins remain compatible',async()=>{

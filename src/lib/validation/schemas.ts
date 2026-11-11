@@ -28,9 +28,10 @@ export const accountSchema=accountIdentitySchema.extend({
 export const tradeSchema=z.object({
  accountId:z.string().uuid(),sequence:z.number().int().min(1).max(1e7).optional(),
  date:z.preprocess(v=>v===''||v===undefined?null:v,z.iso.date().nullable()),
+ tradeTime:z.preprocess(v=>v===''||v===undefined?null:v,z.string().regex(/^([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/).nullable()),
  symbol:optionalText(30),riskPercent:nullableDecimal(0,1),rewardRisk:nullableDecimal(0,1000),
  duration:z.preprocess(v=>v===''||v===undefined?null:v,z.coerce.number().min(0).max(1e7).nullable()),
- pnl:nullableDecimal(-1e12,1e12),notes:optionalText(10000),feelings:optionalText(5000),
+ grossPnl:nullableDecimal(-1e12,1e12),pnl:nullableDecimal(-1e12,1e12).optional(),commission:z.preprocess(v=>v===''||v===undefined?0:v,decimal(-1e12,1e12)).transform(value=>{const absolute=value.startsWith('-')?value.slice(1):value;return /^0(?:\.0+)?$/.test(absolute)?'0':`-${absolute}`;}),notes:optionalText(10000),feelings:optionalText(5000),
  evidenceUrl:evidenceLink.default(''),additionalEvidenceUrls:z.array(evidenceLink).max(3).optional(),
  strategy:optionalText(80),setupGrade:z.enum(['','A+','A','B+','B']).default(''),
  mindset:z.enum(['','euphoria','trust','neutral','fear','fomo','anxiety']).default(''),

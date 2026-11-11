@@ -1,9 +1,10 @@
+import {z} from 'zod';
 import {supabaseServer} from '../supabase/server';
 import {HttpError} from './http';
 import {calculateAnalytics} from '../analytics/journal';
 import {calendarMonthBounds} from '../analytics/calendar';
 import {accountSchema,tradeSchema,scenarioSchema,reviewSubmissionSchema,reviewModerationSchema} from '../validation/schemas';
-import type {AccountRule,AccountType,DrawdownType,Trade,TradingAccount} from '@/types/trading';
+import type {AccountRule,AccountType,DrawdownType,SavedInstrument,Trade,TradingAccount} from '@/types/trading';
 import type {Json} from '../supabase/types';
 import type {parseWorkbook} from '../import/workbook';
 import type {ReviewSubmission,ReviewWorkspace,ReviewStatus} from '@/types/reviews';
@@ -30,9 +31,14 @@ function accountDto(raw:unknown,rules:AccountRule[]=[]):TradingAccount {
  return {...a,accountType:a.accountType??null,currentPhase:a.currentPhase??null,rules};
 }
 function tradeDto(raw:unknown):Trade {
- const t=raw as Trade;
- if(!t?.id||(t.pnl!==null&&typeof t.pnl!=='string'))throw new Error('Invalid operation response.');
- return t;
+ const t=raw as Trade&{tradeTime?:string|null;grossPnl?:string|null;commission?:string|null};
+ if(!t?.id||(t.pnl!==null&&typeof t.pnl!=='string')||(t.grossPnl!=null&&typeof t.grossPnl!=='string')||(t.commission!=null&&typeof t.commission!=='string'))throw new Error('Invalid operation response.');
+ return {...t,tradeTime:t.tradeTime??null,grossPnl:t.grossPnl??t.pnl,commission:t.commission??'0'};
+}
+function instrumentDto(raw:unknown):SavedInstrument {
+ const item=raw as {id?:string;name?:string;created_at?:string;updated_at?:string};
+ if(!item.id||!item.name||!item.created_at||!item.updated_at)throw new Error('Invalid saved instrument response.');
+ return {id:item.id,name:item.name,createdAt:item.created_at,updatedAt:item.updated_at};
 }
 function reviewDto(raw:unknown):ReviewSubmission {
  const review=raw as {id?:string;user_id?:string;reviewer_name?:string;review_text?:string;status?:ReviewStatus;submitted_at?:string;approved_at?:string|null;approved_by?:string|null};
@@ -50,18 +56,19 @@ export async function ownedAccount(userId:string,id:string){
 }
 export async function getWorkspace(userId:string,accountId?:string){
  const db=await supabaseServer();
- const [accountsResult,preferencesResult,rulesResult]=await Promise.all([
+ const [accountsResult,preferencesResult,rulesResult,instrumentsResult]=await Promise.all([
   db.from('account_records').select('*').eq('user_id',userId).order('createdAt'),
   db.from('preferences').select('*').eq('user_id',userId).maybeSingle(),
   db.from('account_rule_records').select('*').eq('user_id',userId).order('phase_number'),
+  db.from('saved_instruments').select('*').eq('user_id',userId).order('name'),
  ]);
- check(accountsResult.error);check(preferencesResult.error);check(rulesResult.error);
+ check(accountsResult.error);check(preferencesResult.error);check(rulesResult.error);check(instrumentsResult.error);
  const rulesByAccount=new Map<string,AccountRule[]>();
  for(const raw of rulesResult.data||[]){if(!raw.account_id)continue;const rules=rulesByAccount.get(raw.account_id)||[];rules.push(ruleDto(raw));rulesByAccount.set(raw.account_id,rules);}
- const accounts=(accountsResult.data||[]).map(raw=>accountDto(raw,rulesByAccount.get(raw.id!)||[])),preference=preferencesResult.data;
+ const accounts=(accountsResult.data||[]).map(raw=>accountDto(raw,rulesByAccount.get(raw.id!)||[])),preference=preferencesResult.data,instruments=(instrumentsResult.data||[]).map(instrumentDto);
  const account=accounts.find(a=>a.id===(accountId||preference?.selectedAccountId))||(accountId?undefined:accounts[0]);
  if(accountId&&!account)throw new HttpError(404,'Trading account not found.');
- if(!account)return {accounts,account:null,analytics:null,recent:[],theme:preference?.theme||'system'};
+ if(!account)return {accounts,account:null,analytics:null,recent:[],instruments,theme:preference?.theme||'system'};
  // Paginate past PostgREST's row cap so statistics never silently omit trades.
  const records:Trade[]=[];
  for(let offset=0;;offset+=500){
@@ -74,7 +81,17 @@ export async function getWorkspace(userId:string,accountId?:string){
   for(let i=1;i<original.length;i+=step){const bucket=original.slice(i,i+step);const min=bucket.reduce((a,b)=>a.balance<b.balance?a:b),max=bucket.reduce((a,b)=>a.balance>b.balance?a:b);sample.push(...[min,max].sort((a,b)=>a.sequence-b.sequence));}
   sample.push(original.at(-1)!);analytics.equity=[...new Map(sample.map(p=>[p.sequence,p])).values()];
  }
- return {accounts,account,analytics,recent:records.slice(-6).reverse(),theme:preference?.theme||'system'};
+ return {accounts,account,analytics,recent:records.slice(-6).reverse(),instruments,theme:preference?.theme||'system'};
+}
+export async function saveInstrument(userId:string,raw:unknown,id?:string){
+ const name=z.string().trim().min(1).max(30).parse((raw as {name?:unknown})?.name),db=await supabaseServer();
+ const result=id?await db.from('saved_instruments').update({name,updated_at:new Date().toISOString()}).eq('id',id).eq('user_id',userId).select('*').maybeSingle():await db.from('saved_instruments').insert({user_id:userId,name}).select('*').single();
+ if(result.error?.code==='23505')throw new HttpError(409,'This instrument is already saved.');
+ check(result.error);if(!result.data)throw new HttpError(404,'Saved instrument not found.');return instrumentDto(result.data);
+}
+export async function removeInstrument(userId:string,id:string){
+ const db=await supabaseServer(),result=await db.from('saved_instruments').delete().eq('id',id).eq('user_id',userId).select('id');
+ check(result.error);if(!result.data?.length)throw new HttpError(404,'Saved instrument not found.');
 }
 export async function createAccount(userId:string,raw:unknown){
  const data=accountSchema.parse(raw),db=await supabaseServer();

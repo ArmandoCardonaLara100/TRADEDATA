@@ -1,6 +1,6 @@
 import {describe,expect,it} from 'vitest';
 import {accountSchema} from '../src/lib/validation/schemas';
-import {dateInTimeZone,normalizeEconomicEvent} from '../src/lib/server/economic-calendar';
+import {normalizeMarketNewsArticle} from '../src/lib/server/market-news';
 
 const base={name:'Evaluation',currency:'USD',initialBalance:'100000',breakEvenBand:'0'};
 const phase=(phaseNumber:number,profitTarget:string)=>({phaseNumber,profitTarget,maxLossLimit:'10',dailyLossLimit:'5',drawdownType:'static' as const});
@@ -22,16 +22,16 @@ describe('trading account rules',()=>{
  });
 });
 
-describe('economic calendar normalization',()=>{
- it('allows only high-impact provider events and never invents an Actual value',()=>{
-  const event=normalizeEconomicEvent({CalendarId:'397194',Date:'2026-11-02T14:00:00',Country:'United States',Category:'Business Confidence',Event:'ISM Manufacturing PMI',Actual:'',Previous:'54.5',Forecast:'54.2',Importance:3,Currency:''});
-  expect(event).toMatchObject({id:'397194',dateUtc:'2026-11-02T14:00:00.000Z',currency:'USD',impact:3,actual:null,previous:'54.5',forecast:'54.2'});
-  expect(normalizeEconomicEvent({CalendarId:'1',Date:'2026-11-02T14:00:00',Country:'Canada',Event:'Medium event',Importance:2})).toBeNull();
+describe('FMP market-news normalization',()=>{
+ it('normalizes the documented FMP Articles response without rendering HTML',()=>{
+  const article=normalizeMarketNewsArticle({title:'Market structure update',date:'2026-11-02 14:00:00',content:'<ul><li><strong>Risk</strong> remains elevated.</li></ul>',tickers:'NYSE:TEST, NASDAQ:DATA',image:'https://portal.financialmodelingprep.com/positions/sample.jpeg',link:'https://financialmodelingprep.com/market-news/sample',author:'FMP Research',site:'Financial Modeling Prep'},'latest');
+  expect(article).toMatchObject({title:'Market structure update',publishedAt:'2026-11-02T14:00:00.000Z',description:'Risk remains elevated.',tickers:['TEST','DATA'],source:'Financial Modeling Prep'});
  });
- it('uses the provider currency when supplied and converts UTC dates by IANA timezone',()=>{
-  const event=normalizeEconomicEvent({CalendarId:'2',Date:'2026-11-02T01:30:00Z',Country:'Canada',Event:'Employment Change',Importance:3,Currency:'C$',Actual:'12K'});
-  expect(event?.currency).toBe('CAD');
-  expect(normalizeEconomicEvent({CalendarId:'3',Date:'2026-11-02T02:30:00Z',Country:'Canada',Event:'Rate Decision',Importance:3,Currency:'$'})?.currency).toBe('CAD');
-  expect(dateInTimeZone(event!.dateUtc,'America/Mexico_City')).toBe('2026-11-01');
+ it('normalizes category feeds and drops unsafe or incomplete records',()=>{
+  const article=normalizeMarketNewsArticle({symbol:'EURUSD',publishedDate:'2026-11-02 01:30:00',publisher:'FX Source',title:'Dollar update',image:'https://images.financialmodelingprep.com/news/dollar.jpg',site:'example.com',text:'Summary',url:'https://example.com/article'},'forex');
+  expect(article).toMatchObject({category:'forex',tickers:['EURUSD'],source:'example.com'});
+  expect(normalizeMarketNewsArticle({title:'Missing URL',publishedDate:'2026-11-02'},'stocks')).toBeNull();
+  expect(normalizeMarketNewsArticle({title:'Unsafe',publishedDate:'2026-11-02',url:'javascript:alert(1)'},'stocks')).toBeNull();
+  expect(normalizeMarketNewsArticle({title:'Safe article',publishedDate:'2026-11-02',url:'https://example.com',image:'https://tracker.example.com/pixel'},'stocks')?.imageUrl).toBeNull();
  });
 });

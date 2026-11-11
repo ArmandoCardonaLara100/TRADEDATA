@@ -71,6 +71,33 @@ export type Database = {
           },
         ]
       }
+      analytics_events: {
+        Row: {
+          created_at: string
+          event_name: string
+          feature: string
+          id: number
+          metadata: Json
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          event_name: string
+          feature: string
+          id?: never
+          metadata?: Json
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          event_name?: string
+          feature?: string
+          id?: never
+          metadata?: Json
+          user_id?: string
+        }
+        Relationships: []
+      }
       preferences: {
         Row: {
           selectedAccountId: string | null
@@ -125,6 +152,30 @@ export type Database = {
         }
         Relationships: []
       }
+      review_moderation_audit: {
+        Row: {
+          action: string
+          actor_user_id: string | null
+          created_at: string
+          id: number
+          review_id: string
+        }
+        Insert: {
+          action: string
+          actor_user_id?: string | null
+          created_at?: string
+          id?: never
+          review_id: string
+        }
+        Update: {
+          action?: string
+          actor_user_id?: string | null
+          created_at?: string
+          id?: never
+          review_id?: string
+        }
+        Relationships: []
+      }
       review_submissions: {
         Row: {
           approved_at: string | null
@@ -154,6 +205,30 @@ export type Database = {
           reviewer_name?: string
           status?: string
           submitted_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      saved_instruments: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          updated_at?: string
           user_id?: string
         }
         Relationships: []
@@ -253,6 +328,7 @@ export type Database = {
           accountId: string
           additionalEvidencePaths: string[]
           additionalEvidenceUrls: string[]
+          commission: number
           created_at: string
           date: string | null
           direction: string
@@ -260,6 +336,7 @@ export type Database = {
           evidencePath: string
           evidenceUrl: string
           feelings: string
+          grossPnl: number | null
           id: string
           mindset: string
           notes: string
@@ -273,6 +350,7 @@ export type Database = {
           strategy: string
           symbol: string
           tags: string
+          tradeTime: string | null
           updated_at: string
           user_id: string
           version: number
@@ -281,6 +359,7 @@ export type Database = {
           accountId: string
           additionalEvidencePaths?: string[]
           additionalEvidenceUrls?: string[]
+          commission?: number
           created_at?: string
           date?: string | null
           direction?: string
@@ -288,6 +367,7 @@ export type Database = {
           evidencePath?: string
           evidenceUrl?: string
           feelings?: string
+          grossPnl?: number | null
           id?: string
           mindset?: string
           notes?: string
@@ -301,6 +381,7 @@ export type Database = {
           strategy?: string
           symbol?: string
           tags?: string
+          tradeTime?: string | null
           updated_at?: string
           user_id: string
           version?: number
@@ -309,6 +390,7 @@ export type Database = {
           accountId?: string
           additionalEvidencePaths?: string[]
           additionalEvidenceUrls?: string[]
+          commission?: number
           created_at?: string
           date?: string | null
           direction?: string
@@ -316,6 +398,7 @@ export type Database = {
           evidencePath?: string
           evidenceUrl?: string
           feelings?: string
+          grossPnl?: number | null
           id?: string
           mindset?: string
           notes?: string
@@ -329,6 +412,7 @@ export type Database = {
           strategy?: string
           symbol?: string
           tags?: string
+          tradeTime?: string | null
           updated_at?: string
           user_id?: string
           version?: number
@@ -534,12 +618,14 @@ export type Database = {
           accountId: string | null
           additionalEvidencePaths: string[] | null
           additionalEvidenceUrls: string[] | null
+          commission: string | null
           date: string | null
           direction: string | null
           duration: number | null
           evidencePath: string | null
           evidenceUrl: string | null
           feelings: string | null
+          grossPnl: string | null
           id: string | null
           mindset: string | null
           notes: string | null
@@ -553,6 +639,7 @@ export type Database = {
           strategy: string | null
           symbol: string | null
           tags: string | null
+          tradeTime: string | null
           user_id: string | null
           version: number | null
         }
@@ -560,12 +647,14 @@ export type Database = {
           accountId?: string | null
           additionalEvidencePaths?: string[] | null
           additionalEvidenceUrls?: string[] | null
+          commission?: never
           date?: string | null
           direction?: string | null
           duration?: number | null
           evidencePath?: string | null
           evidenceUrl?: string | null
           feelings?: string | null
+          grossPnl?: never
           id?: string | null
           mindset?: string | null
           notes?: string | null
@@ -579,6 +668,7 @@ export type Database = {
           strategy?: string | null
           symbol?: string | null
           tags?: string | null
+          tradeTime?: string | null
           user_id?: string | null
           version?: number | null
         }
@@ -586,12 +676,14 @@ export type Database = {
           accountId?: string | null
           additionalEvidencePaths?: string[] | null
           additionalEvidenceUrls?: string[] | null
+          commission?: never
           date?: string | null
           direction?: string | null
           duration?: number | null
           evidencePath?: string | null
           evidenceUrl?: string | null
           feelings?: string | null
+          grossPnl?: never
           id?: string | null
           mindset?: string | null
           notes?: string | null
@@ -605,6 +697,7 @@ export type Database = {
           strategy?: string | null
           symbol?: string | null
           tags?: string | null
+          tradeTime?: string | null
           user_id?: string | null
           version?: number | null
         }
@@ -628,9 +721,15 @@ export type Database = {
     }
     Functions: {
       get_admin_dashboard: {
-        Args: { p_range?: string; p_review_page?: number; p_review_status?: string; p_user_page?: number }
+        Args: {
+          p_range?: string
+          p_review_page?: number
+          p_review_status?: string
+          p_user_page?: number
+        }
         Returns: Json
       }
+      get_admin_news_analytics: { Args: { p_range?: string }; Returns: Json }
       import_workbook: { Args: { p_sheets: Json }; Returns: Json }
       record_analytics_event: {
         Args: { p_event_name: string; p_feature: string; p_metadata?: Json }

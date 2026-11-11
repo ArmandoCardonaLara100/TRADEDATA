@@ -3,7 +3,7 @@ import {aggregateCalendarDays, calendarMonthBounds} from '../src/lib/analytics/c
 import type {Trade} from '../src/types/trading';
 
 function trade(sequence:number,date:string|null,pnl:string|null):Trade {
-  return {id:String(sequence),accountId:'account',sequence,date,pnl,symbol:'EUR/USD',riskPercent:null,
+  return {id:String(sequence),accountId:'account',sequence,date,tradeTime:null,grossPnl:pnl,commission:'0',pnl,symbol:'EUR/USD',riskPercent:null,
     rewardRisk:null,duration:null,notes:'',feelings:'',evidenceUrl:'',additionalEvidenceUrls:[],evidencePath:'',additionalEvidencePaths:[],strategy:'',setupGrade:'',mindset:'',direction:'',session:'',tags:'',sourceRow:null,version:1};
 }
 

@@ -13,6 +13,7 @@ export type AdminFeatureUsage={
  distinct_users:number;adoption_percent:number;trend_percent:number|null;
 };
 export type AdminFeatureTimelinePoint={date:string;feature:string;actualUses:number};
+export type AdminNewsAnalytics={views:number;articleOpens:number;uniqueReaders:number;engagementPercent:number;categories:{category:'latest'|'stocks'|'forex'|'crypto';opens:number}[]};
 export type AdminUser={
  name:string;createdAt:string;role:'user'|'review_admin'|'admin';lastActivity:string|null;
  accountCount:number;tradeCount:number;status:'active'|'inactive'|'blocked';
@@ -25,5 +26,5 @@ export type AdminPage<T>={page:number;pageSize:number;total:number;items:T[]};
 export type AdminDashboardData={
  range:AdminRange;generatedAt:string;analyticsEnabledAt:string|null;kpis:AdminKpis;userGrowth:AdminGrowthPoint[];
  featureTimeline:AdminFeatureTimelinePoint[];features:AdminFeatureUsage[];users:AdminPage<AdminUser>;
- reviews:AdminPage<AdminReview>&{status:AdminReviewStatus};
+ reviews:AdminPage<AdminReview>&{status:AdminReviewStatus};news:AdminNewsAnalytics;
 };

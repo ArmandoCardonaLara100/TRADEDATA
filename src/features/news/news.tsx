@@ -1,35 +1,52 @@
 'use client';
-import {useEffect,useMemo,useState} from 'react';
-import {AlertTriangle,CalendarDays,ChevronLeft,ChevronRight,Clock3,Globe2,RefreshCw} from 'lucide-react';
+import {useEffect,useMemo,useRef,useState} from 'react';
+import {AlertTriangle,ArrowUpRight,ImageOff,RefreshCw,Search} from 'lucide-react';
 import {Button,Empty,PageHeading,Panel} from '@/components/ui';
-import {useLanguage} from '@/lib/i18n';
-import type {EconomicCalendarResponse,EconomicEvent} from '@/types/news';
+import {useLanguage,type MessageKey} from '@/lib/i18n';
+import type {MarketNewsArticle,MarketNewsResponse,NewsCategory} from '@/types/news';
 import {trackAnalytics,useAnalyticsView} from '@/lib/analytics/client';
 
-const shift=(date:string,days:number)=>{const value=new Date(`${date}T12:00:00Z`);value.setUTCDate(value.getUTCDate()+days);return value.toISOString().slice(0,10);};
-function localDate(timeZone:string){
- const parts=new Intl.DateTimeFormat('en-US',{timeZone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date()),part=(type:Intl.DateTimeFormatPartTypes)=>parts.find(item=>item.type===type)?.value||'';
- return `${part('year')}-${part('month')}-${part('day')}`;
+const categories:NewsCategory[]=['latest','stocks','forex','crypto'];
+const REFRESH_COOLDOWN_MS=30_000;
+
+function NewsImage({article}:{article:MarketNewsArticle}){
+ const [failed,setFailed]=useState(false);
+ if(!article.imageUrl||failed)return <div className="news-image-fallback" aria-hidden="true"><ImageOff size={24}/></div>;
+ return <img src={article.imageUrl} alt="" loading="lazy" decoding="async" onError={()=>setFailed(true)}/>;
 }
+
 export function News(){
  useAnalyticsView('news','news_viewed');
  const {t,language}=useLanguage(),locale=language==='es'?'es-MX':'en-US';
- const [timeZone,setTimeZone]=useState(''),[date,setDate]=useState(''),[data,setData]=useState<EconomicCalendarResponse|null>(null),[loading,setLoading]=useState(true),[error,setError]=useState(false),[refresh,setRefresh]=useState(0),[currency,setCurrency]=useState('all'),[country,setCountry]=useState('all');
- useEffect(()=>{const zone=Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC';setTimeZone(zone);setDate(localDate(zone));},[]);
+ const [category,setCategory]=useState<NewsCategory>('latest'),[articles,setArticles]=useState<MarketNewsArticle[]>([]),[available,setAvailable]=useState<NewsCategory[]>(['latest']);
+ const [page,setPage]=useState(0),[hasMore,setHasMore]=useState(false),[status,setStatus]=useState<'ok'|'stale'>('ok'),[checkedAt,setCheckedAt]=useState('');
+ const [loading,setLoading]=useState(true),[loadingMore,setLoadingMore]=useState(false),[error,setError]=useState(false),[search,setSearch]=useState(''),[revision,setRevision]=useState(0),[cooldown,setCooldown]=useState(false);
+ const initial=useRef(true);
  useEffect(()=>{
-  if(!timeZone||!date)return;const controller=new AbortController();let active=true;setLoading(true);setError(false);
-  fetch(`/api/news?date=${encodeURIComponent(date)}&timezone=${encodeURIComponent(timeZone)}`,{signal:controller.signal,headers:{Accept:'application/json'}}).then(async response=>{if(!response.ok)throw new Error('unavailable');return response.json() as Promise<EconomicCalendarResponse>;}).then(result=>{if(active)setData(result);}).catch(cause=>{if(!active||cause instanceof DOMException&&cause.name==='AbortError')return;setData(null);setError(true);}).finally(()=>{if(active)setLoading(false);});
+  const controller=new AbortController();let active=true;setLoading(true);setError(false);
+  fetch(`/api/news?category=${category}&page=0&r=${revision}`,{signal:controller.signal,headers:{Accept:'application/json'}})
+   .then(async response=>{if(!response.ok)throw new Error('unavailable');return response.json() as Promise<MarketNewsResponse>;})
+   .then(result=>{if(!active)return;setArticles(result.articles);setAvailable(result.availableCategories);setPage(0);setHasMore(result.hasMore);setStatus(result.status);setCheckedAt(result.checkedAt);})
+   .catch(cause=>{if(!active||cause instanceof DOMException&&cause.name==='AbortError')return;setArticles([]);setError(true);})
+   .finally(()=>{if(active)setLoading(false);});
   return()=>{active=false;controller.abort();};
- },[date,timeZone,refresh]);
- useEffect(()=>{setCurrency('all');setCountry('all');},[date]);
- useEffect(()=>{if(currency!=='all')trackAnalytics('news','news_filter_changed',{filter_name:'currency'});},[currency]);
- useEffect(()=>{if(country!=='all')trackAnalytics('news','news_filter_changed',{filter_name:'country'});},[country]);
- useEffect(()=>{if(!date||!timeZone||date!==localDate(timeZone))return;const timer=window.setInterval(()=>{if(document.visibilityState==='visible')setRefresh(value=>value+1);},5*60_000);return()=>window.clearInterval(timer);},[date,timeZone]);
- const currencies=useMemo(()=>[...new Set((data?.events||[]).map(event=>event.currency))].sort(),[data]);
- const countries=useMemo(()=>[...new Set((data?.events||[]).map(event=>event.country))].sort(),[data]);
- const events=useMemo(()=>data?.events.filter(event=>(currency==='all'||event.currency===currency)&&(country==='all'||event.country===country))||[],[data,currency,country]);
- const today=timeZone?localDate(timeZone):'',dateLabel=date?new Intl.DateTimeFormat(locale,{dateStyle:'full',timeZone:'UTC'}).format(new Date(`${date}T12:00:00Z`)):'';
- const countryName=(event:EconomicEvent)=>event.countryCode?new Intl.DisplayNames([locale],{type:'region'}).of(event.countryCode)||event.country:event.country;
- const countryLabel=(value:string)=>{const event=data?.events.find(item=>item.country===value);return event?countryName(event):value;};
- return <><PageHeading eyebrow={t('news.eyebrow')} title={t('news.title')} description={t('news.description')} actions={<Button variant="secondary" disabled={loading||!date} onClick={()=>setRefresh(value=>value+1)}><span className={loading?'spin':''}><RefreshCw size={15}/></span>{t('news.refresh')}</Button>}/><Panel className="news-control-panel"><div className="news-date-nav"><button className="icon-button" aria-label={t('news.previousDay')} disabled={!date} onClick={()=>setDate(value=>shift(value,-1))}><ChevronLeft size={18}/></button><div><span>{t('news.selectedDate')}</span><strong>{dateLabel||t('news.loading')}</strong><small>{t('news.timezone').replace('{timezone}',timeZone||'—')}</small></div><button className="icon-button" aria-label={t('news.nextDay')} disabled={!date} onClick={()=>setDate(value=>shift(value,1))}><ChevronRight size={18}/></button><Button className="news-today" variant="ghost" disabled={!today||date===today} onClick={()=>setDate(today)}>{t('news.today')}</Button></div><fieldset className="news-filters"><legend className="sr-only">{t('news.filterLabel')}</legend><label><span>{t('news.impact')}</span><select disabled><option>{t('news.highImpact')}</option></select></label><label><span>{t('news.currency')}</span><select value={currency} onChange={event=>setCurrency(event.target.value)}><option value="all">{t('news.allCurrencies')}</option>{currencies.map(value=><option key={value} value={value}>{value==='OTHER'?t('news.other'):value}</option>)}</select></label><label><span>{t('news.country')}</span><select value={country} onChange={event=>setCountry(event.target.value)}><option value="all">{t('news.allCountries')}</option>{countries.map(value=><option key={value} value={value}>{countryLabel(value)}</option>)}</select></label></fieldset></Panel>{data?.status==='stale'&&<div className="news-stale" role="status"><AlertTriangle size={17}/><div><strong>{t('news.stale')}</strong><span>{t('news.staleText')}</span></div></div>}{loading?<div className="news-loading" aria-live="polite"><span className="spin"><RefreshCw size={20}/></span>{t('news.loading')}</div>:error?<Panel><Empty icon={<AlertTriangle size={28}/>} title={t('news.unavailable')} description={t('news.source')}/></Panel>:events.length?<div className="news-events" aria-label={t('news.eventsLabel')}>{events.map(event=>{const released=event.actual!==null,occurred=new Date(event.dateUtc).getTime()<=Date.now(),state=released?'news.released':occurred?'news.awaiting':'news.upcoming';return <article className="news-event" key={event.id}><div className="news-event-time"><strong>{new Intl.DateTimeFormat(locale,{hour:'numeric',minute:'2-digit',timeZone}).format(new Date(event.dateUtc))}</strong><span><Clock3 size={13}/>{t(state)}</span></div><div className="news-event-main"><div className="news-event-meta"><span className="impact-badge"><i/>{t('news.highImpact')}</span><span className="currency-badge">{event.currency==='OTHER'?t('news.other'):event.currency}</span><span><Globe2 size={13}/>{countryName(event)}</span></div><h2>{event.event}</h2><p>{event.category}{event.reference?` · ${t('news.reference').replace('{value}',event.reference)}`:''}</p></div><dl className="news-values"><div><dt>{t('news.previous')}</dt><dd>{event.previous||t('news.noValue')}</dd></div><div><dt>{t('news.forecast')}</dt><dd>{event.forecast||t('news.noValue')}</dd></div><div className={released?'released':''}><dt>{t('news.actual')}</dt><dd>{event.actual||t('news.noValue')}</dd></div></dl></article>;})}</div>:<Panel><Empty icon={<CalendarDays size={28}/>} title={t('news.empty')} description={t('news.emptyText')}/></Panel>}<div className="news-source"><a href="https://tradingeconomics.com/calendar" target="_blank" rel="noreferrer">{t('news.source')}</a>{data&&<span>{t('news.checked').replace('{time}',new Intl.DateTimeFormat(locale,{dateStyle:'medium',timeStyle:'short',timeZone}).format(new Date(data.checkedAt)))}</span>}</div></>;
+ },[category,revision]);
+ useEffect(()=>{if(initial.current){initial.current=false;return;}trackAnalytics('news','news_filter_changed',{filter_name:'category'});},[category]);
+ const filtered=useMemo(()=>{const query=search.trim().toLocaleLowerCase(locale);if(!query)return articles;return articles.filter(article=>[article.title,article.description,article.source,...article.tickers].some(value=>value.toLocaleLowerCase(locale).includes(query)));},[articles,locale,search]);
+ const selectCategory=(value:NewsCategory)=>{setSearch('');setCategory(value);};
+ const refresh=()=>{if(cooldown)return;setCooldown(true);setRevision(value=>value+1);window.setTimeout(()=>setCooldown(false),REFRESH_COOLDOWN_MS);};
+ async function loadMore(){
+  const next=page+1;setLoadingMore(true);setError(false);
+  try{const response=await fetch(`/api/news?category=${category}&page=${next}`,{headers:{Accept:'application/json'}});if(!response.ok)throw new Error('unavailable');const result=await response.json() as MarketNewsResponse;setArticles(current=>[...current,...result.articles.filter(article=>!current.some(existing=>existing.articleUrl===article.articleUrl))]);setPage(next);setHasMore(result.hasMore);setStatus(result.status);setCheckedAt(result.checkedAt);}
+  catch{setError(true);}finally{setLoadingMore(false);}
+ }
+ return <>
+  <PageHeading eyebrow={t('news.eyebrow')} title={t('news.title')} description={t('news.description')} actions={<Button variant="secondary" disabled={loading||cooldown} onClick={refresh}><RefreshCw size={15} className={loading?'spin':''}/>{cooldown?t('news.refreshWait'):t('news.refresh')}</Button>}/>
+  <Panel className="news-control-panel"><div className="news-category-tabs" role="tablist" aria-label={t('news.categories')}>{categories.filter(value=>available.includes(value)).map(value=><button key={value} type="button" role="tab" aria-selected={category===value} className={category===value?'active':''} onClick={()=>selectCategory(value)}>{t(`news.category.${value}` as MessageKey)}</button>)}</div><label className="news-search"><span className="sr-only">{t('news.search')}</span><Search size={16}/><input type="search" value={search} onChange={event=>setSearch(event.target.value)} placeholder={t('news.searchPlaceholder')} maxLength={100}/></label></Panel>
+  {status==='stale'&&!loading&&<div className="news-stale" role="status"><AlertTriangle size={17}/><div><strong>{t('news.stale')}</strong><span>{t('news.staleText')}</span></div></div>}
+  {loading?<NewsSkeleton label={t('common.loading')}/>:error&&!articles.length?<Panel><Empty icon={<AlertTriangle size={28}/>} title={t('news.unavailable')} description={t('news.unavailableText')}/></Panel>:filtered.length?<div className="market-news-grid" aria-label={t('news.articlesLabel')}>{filtered.map(article=><article className="market-news-card" key={article.id}><div className="market-news-image"><NewsImage article={article}/>{article.tickers.length>0&&<div className="market-news-tickers">{article.tickers.slice(0,3).map(ticker=><span key={ticker}>{ticker}</span>)}</div>}</div><div className="market-news-body"><div className="market-news-meta"><span>{article.source}</span><time dateTime={article.publishedAt}>{new Intl.DateTimeFormat(locale,{dateStyle:'medium',timeStyle:'short'}).format(new Date(article.publishedAt))}</time></div><h2>{article.title}</h2>{article.description&&<p>{article.description}</p>}<a href={article.articleUrl} target="_blank" rel="noopener noreferrer" onClick={()=>trackAnalytics('news','news_article_opened',{category:article.category})}>{t('news.readArticle')}<ArrowUpRight size={15}/><span className="sr-only">: {article.title}</span></a></div></article>)}</div>:<Panel><Empty icon={<Search size={28}/>} title={t('news.empty')} description={t('news.emptyText')}/></Panel>}
+  {!loading&&articles.length>0&&<div className="news-footer-actions">{hasMore&&<Button variant="secondary" loading={loadingMore} onClick={()=>void loadMore()}>{t('news.loadMore')}</Button>}<div className="news-source"><a href="https://financialmodelingprep.com/" target="_blank" rel="noopener noreferrer">{t('news.source')}</a>{checkedAt&&<span>{t('news.checked').replace('{time}',new Intl.DateTimeFormat(locale,{dateStyle:'medium',timeStyle:'short'}).format(new Date(checkedAt)))}</span>}</div></div>}
+ </>;
 }
+
+function NewsSkeleton({label}:{label:string}){return <div className="market-news-grid" aria-live="polite" aria-label={label}>{Array.from({length:6},(_,index)=><div className="market-news-card news-card-skeleton" key={index}><div className="market-news-image"/><div className="market-news-body"><i/><i/><i/></div></div>)}</div>;}

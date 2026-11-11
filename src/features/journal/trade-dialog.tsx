@@ -1,6 +1,6 @@
 'use client';
-import {useEffect,useState,type ClipboardEvent,type FormEvent} from 'react';
-import {ExternalLink,ImagePlus,Link2,LoaderCircle,Pencil,RotateCcw,Trash2,Upload,X} from 'lucide-react';
+import {useEffect,useId,useState,type ClipboardEvent,type FormEvent} from 'react';
+import {BookmarkPlus,ExternalLink,ImagePlus,Link2,LoaderCircle,Pencil,RotateCcw,Trash2,Upload,X} from 'lucide-react';
 import {Modal,Button,Field,ErrorMessage} from '@/components/ui';
 import {api,message} from '@/lib/client';
 import {useWorkspace} from '@/features/workspace/context';
@@ -30,9 +30,22 @@ function SelectedImage({file,alt}:{file:File;alt:string}){
  return src?<img className="evidence-selected-image" src={src} alt={alt}/>:null;
 }
 
+const localTradeTime=()=>new Intl.DateTimeFormat('en-GB',{hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date());
+
+function InstrumentField({initialValue}:{initialValue:string}){
+ const {account,instruments=[],refresh,notify}=useWorkspace(),{t}=useLanguage();
+ const inputId=useId(),listId=useId();
+ const [value,setValue]=useState(initialValue),[working,setWorking]=useState(false),[error,setError]=useState('');
+ const normalized=value.trim(),saved=instruments.find(item=>item.name.toLocaleLowerCase()===normalized.toLocaleLowerCase());
+ async function save(){if(!normalized||saved)return;setWorking(true);setError('');try{await api('/api/instruments',{method:'POST',body:JSON.stringify({name:normalized})});await refresh(account?.id);notify(t('journal.instrumentSaved'));}catch(cause){setError(message(cause));}finally{setWorking(false);}}
+ async function remove(id:string){setWorking(true);setError('');try{await api(`/api/instruments?id=${encodeURIComponent(id)}`,{method:'DELETE'});await refresh(account?.id);notify(t('journal.instrumentRemoved'));}catch(cause){setError(message(cause));}finally{setWorking(false);}}
+ return <div className="field"><label htmlFor={inputId}>{t('journal.instrument')}</label><div className="instrument-entry"><input id={inputId} name="symbol" list={listId} placeholder="EUR/USD" maxLength={30} value={value} onChange={event=>setValue(event.target.value)}/><Button type="button" variant="ghost" disabled={working||!normalized||Boolean(saved)} onClick={()=>void save()}><BookmarkPlus size={14}/>{t(saved?'journal.instrumentSavedLabel':'journal.saveInstrument')}</Button></div><datalist id={listId}>{instruments.map(item=><option key={item.id} value={item.name}/>)}</datalist>{instruments.length>0&&<div className="saved-instrument-list" aria-label={t('journal.savedInstruments')}>{instruments.map(item=><span key={item.id}><button type="button" onClick={()=>setValue(item.name)}>{item.name}</button><button type="button" disabled={working} aria-label={t('journal.removeSavedInstrument').replace('{instrument}',item.name)} onClick={()=>void remove(item.id)}><X size={11}/></button></span>)}</div>}<small>{t('journal.instrumentHint')}</small>{error&&<small className="field-error" role="alert">{error}</small>}</div>;
+}
+
 export function TradeDialog({open,onOpenChange,trade,onPersisted,onSaved}:{open:boolean;onOpenChange:(v:boolean)=>void;trade?:Trade;onPersisted?:()=>void|Promise<void>;onSaved?:()=>void|Promise<void>}){
  const {account,refresh,notify}=useWorkspace(),{t}=useLanguage();
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[slots,setSlots]=useState<EvidenceSlot[]>(()=>initialSlots(trade)),[persistedTrade,setPersistedTrade]=useState<Trade|undefined>(trade);
+ const [grossInput,setGrossInput]=useState(numericInputValue(trade?.grossPnl??trade?.pnl)),[commissionInput,setCommissionInput]=useState(numericInputValue(trade?.commission));
  const record=persistedTrade||trade;
  const updateSlot=(index:number,patch:Partial<EvidenceSlot>)=>setSlots(current=>current.map((slot,i)=>i===index?{...slot,...patch}:slot));
  function chooseImage(index:number,file:File|undefined){
@@ -41,6 +54,8 @@ export function TradeDialog({open,onOpenChange,trade,onPersisted,onSaved}:{open:
   if(file.size>MAX_EVIDENCE_BYTES){updateSlot(index,{file:null,status:'error',error:t('journal.evidenceSizeError')});return;}
   updateSlot(index,{file,status:'selected',remove:false,error:''});setError('');
  }
+ let netPreview='';
+ try{if(grossInput.trim())netPreview=new D(grossInput).plus(new D(commissionInput||0).abs().negated()).toString();}catch{/* Validation displays when submitted. */}
  function pasteImage(index:number,event:ClipboardEvent<HTMLElement>){
   const file=[...event.clipboardData.items].find(item=>item.type.startsWith('image/'))?.getAsFile();
   if(file){event.preventDefault();chooseImage(index,file);}
@@ -86,9 +101,12 @@ export function TradeDialog({open,onOpenChange,trade,onPersisted,onSaved}:{open:
   <form onSubmit={submit} className="form-stack">
    <ErrorMessage error={error}/>
    <div className="form-grid">
-    <Field label={t('journal.instrument')}><input name="symbol" placeholder="EUR/USD" maxLength={30} defaultValue={record?.symbol||''}/></Field>
+    <InstrumentField initialValue={record?.symbol||''}/>
     <Field label={t('journal.tradeDate')} hint={t('journal.tradeDateHint')}><input name="date" type="date" defaultValue={record?record.date||'':localTradeDate()}/></Field>
-    <Field label={`${t('journal.netResult')} (${account?.currency||'USD'})`} hint={t('journal.netResultHint')}><input name="pnl" type="number" step="0.00000001" max="1000000000000" min="-1000000000000" placeholder={t('journal.netResultPlaceholder')} defaultValue={numericInputValue(record?.pnl)}/></Field>
+    <Field label={t('journal.tradeTime')} hint={t('journal.tradeTimeHint')}><input name="tradeTime" type="time" step="60" defaultValue={record?.tradeTime?.slice(0,5)||localTradeTime()}/></Field>
+    <Field label={`${t('journal.grossResult')} (${account?.currency||'USD'})`} hint={t('journal.grossResultHint')}><input name="grossPnl" type="number" step="0.00000001" max="1000000000000" min="-1000000000000" placeholder={t('journal.netResultPlaceholder')} value={grossInput} onChange={event=>setGrossInput(event.target.value)}/></Field>
+    <Field label={`${t('journal.commission')} (${account?.currency||'USD'})`} hint={t('journal.commissionHint')}><input name="commission" type="number" step="0.00000001" max="1000000000000" min="-1000000000000" placeholder="—" value={commissionInput} onChange={event=>setCommissionInput(event.target.value)}/></Field>
+    <Field label={`${t('journal.netResult')} (${account?.currency||'USD'})`} hint={t('journal.netResultFormula')}><output className={`net-result-preview ${netPreview&&Number(netPreview)<0?'negative':netPreview?'positive':''}`}>{netPreview?number(Number(netPreview)):'—'}</output></Field>
     <Field label={t('journal.riskPercent')}><input name="riskPercent" type="number" min="0" max="100" step="0.000001" placeholder="1.00" defaultValue={record?.riskPercent?numericInputValue(record.riskPercent,100):''}/></Field>
     <Field label={t('journal.plannedR')}><input name="rewardRisk" type="number" min="0" max="1000" step="0.00000001" placeholder="2.50" defaultValue={numericInputValue(record?.rewardRisk)}/></Field>
     <Field label={t('journal.duration')}><input name="duration" type="number" min="0" max="10000000" step="0.01" placeholder="30" defaultValue={numericInputValue(record?.duration)}/></Field>
@@ -134,9 +152,9 @@ export function TradeDetails({trade,onClose,onChanged}:{trade:Trade|null;onClose
  const {account,refresh,notify}=useWorkspace(),{t}=useLanguage();const [editing,setEditing]=useState(false),[deleting,setDeleting]=useState(false),[sharing,setSharing]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('');if(!trade||!account)return null;
  const outcome=classify(trade.pnl,account.breakEvenBand),paths=Array.from({length:EVIDENCE_SLOTS},(_,index)=>evidencePathForSlot(trade,index+1)),links=[trade.evidenceUrl,...(trade.additionalEvidenceUrls||[])],tradeId=trade.id,tradeVersion=trade.version;
  async function remove(){setBusy(true);setError('');try{await api(`/api/trades/${tradeId}?version=${tradeVersion}`,{method:'DELETE'});await refresh();await onChanged?.();notify(t('journal.deleted'));setDeleting(false);onClose();}catch(e){setError(message(e));}finally{setBusy(false);}}
- return <><Modal open={!editing&&!deleting} onOpenChange={v=>{if(!v)onClose();}} title={`${t('journal.operation')} #${trade.sequence}`} description={`${trade.symbol||t('journal.unspecified')} · ${trade.date||t('journal.noDate')}`} wide>
+ return <><Modal open={!editing&&!deleting} onOpenChange={v=>{if(!v)onClose();}} title={`${t('journal.operation')} #${trade.sequence}`} description={`${trade.symbol||t('journal.unspecified')} · ${trade.date||t('journal.noDate')}${trade.tradeTime?` · ${trade.tradeTime.slice(0,5)}`:''}`} wide>
   <div className="trade-detail-result"><span className={`outcome-badge ${outcome}`}>{t(outcome==='breakeven'?'journal.breakEven':outcome==='open'?'journal.incomplete':outcome==='win'?'journal.win':'journal.loss')}</span><strong className={Number(trade.pnl)>=0?'positive':'negative'}>{trade.pnl===null?t('journal.awaitingResult'):signedMoney(Number(trade.pnl),account.currency)}</strong></div>
-  <dl className="details-grid">{[[t('journal.riskPercent'),trade.riskPercent?`${number(Number(trade.riskPercent)*100)}%`:'—'],[t('journal.plannedR'),trade.rewardRisk?`${number(Number(trade.rewardRisk))}R`:'—'],[t('journal.duration'),trade.duration===null?'—':`${number(trade.duration)} ${t('journal.minutesShort')}`],[t('journal.strategy'),trade.strategy||'—'],[t('journal.grade'),trade.setupGrade||'—'],[t('journal.mindset'),trade.mindset?t(`journal.mindset.${trade.mindset}`):'—'],[t('journal.direction'),trade.direction?t(`journal.${trade.direction}`):'—'],[t('journal.session'),trade.session||'—']].map(([k,v])=><div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
+  <dl className="details-grid">{[[t('journal.tradeTime'),trade.tradeTime?.slice(0,5)||'—'],[t('journal.grossResult'),trade.grossPnl===null?'—':signedMoney(Number(trade.grossPnl),account.currency)],[t('journal.commission'),signedMoney(Number(trade.commission),account.currency)],[t('journal.netResult'),trade.pnl===null?'—':signedMoney(Number(trade.pnl),account.currency)],[t('journal.riskPercent'),trade.riskPercent?`${number(Number(trade.riskPercent)*100)}%`:'—'],[t('journal.plannedR'),trade.rewardRisk?`${number(Number(trade.rewardRisk))}R`:'—'],[t('journal.duration'),trade.duration===null?'—':`${number(trade.duration)} ${t('journal.minutesShort')}`],[t('journal.strategy'),trade.strategy||'—'],[t('journal.grade'),trade.setupGrade||'—'],[t('journal.mindset'),trade.mindset?t(`journal.mindset.${trade.mindset}`):'—'],[t('journal.direction'),trade.direction?t(`journal.${trade.direction}`):'—'],[t('journal.session'),trade.session||'—']].map(([k,v])=><div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
   {trade.notes&&<div className="detail-notes"><h3>{t('journal.analysis')}</h3><p>{trade.notes}</p></div>}{trade.feelings&&<div className="detail-notes"><h3>{t('journal.mindsetNote')}</h3><p>{trade.feelings}</p></div>}{trade.tags&&<p className="muted">{t('journal.tags')}: {trade.tags}</p>}
   {(paths.some(Boolean)||links.some(Boolean))&&<section className="trade-evidence"><h3>{t('journal.evidenceTitle')}</h3><div className="trade-evidence-grid">{paths.map((path,index)=>(path||links[index])&&<div className="trade-evidence-slot" key={index}><strong>{t('journal.evidenceSlot')} {index+1}</strong>{path&&<EvidenceImage src={`/api/trades/${trade.id}/evidence?slot=${index+1}`} alt={`${t('journal.evidencePreview')} ${index+1}`} openLabel={`${t('journal.openPreview')} ${index+1}`} closeLabel={t('journal.closePreview')}/>} {links[index]&&<a href={links[index]} target="_blank" rel="noopener noreferrer" className="text-link" aria-label={`${t('journal.openEvidence')} ${index+1}`}>{t('journal.openEvidence')}<ExternalLink size={15}/></a>}</div>)}</div></section>}
   {trade.sourceRow&&<p className="source-caption">{t('journal.sourceCaption').replace('{sheet}',account.sourceSheet||'').replace('{row}',String(trade.sourceRow))}</p>}

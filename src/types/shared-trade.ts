@@ -3,11 +3,14 @@ import type {Outcome} from './trading';
 export interface SharedTrade {
  sequence:number;
  date:string|null;
+ tradeTime:string|null;
  symbol:string;
  riskPercent:string|null;
  rewardRisk:string|null;
  duration:number|null;
  pnl:string|null;
+ grossPnl:string|null;
+ commission:string;
  notes:string;
  feelings:string;
  strategy:string;

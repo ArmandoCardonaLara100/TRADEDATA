@@ -8,7 +8,7 @@ import type {Trade,TradingAccount} from '../src/types/trading';
 
 const accountId='11111111-1111-4111-8111-111111111111';
 const account:TradingAccount={id:accountId,name:'Account A',currency:'USD',initialBalance:'10000',breakEvenBand:'0',sourceSheet:null,baselineBreakEven:false,riskMetric:'planned',createdAt:'2026-10-01',accountType:'challenge',currentPhase:2,rules:[{phaseNumber:1,profitTarget:'8',maxLossLimit:'10',dailyLossLimit:'5',drawdownType:'static'},{phaseNumber:2,profitTarget:'5',maxLossLimit:'10',dailyLossLimit:'4',drawdownType:'trailing'}]};
-function trade(sequence:number,date:string,pnl:string):Trade{return {id:String(sequence),accountId,sequence,date,pnl,symbol:'EUR/USD',riskPercent:null,rewardRisk:null,duration:null,notes:'',feelings:'',evidenceUrl:'',additionalEvidenceUrls:[],evidencePath:'',additionalEvidencePaths:[],strategy:'Breakout',setupGrade:'A+',mindset:'fear',direction:'',session:'',tags:'',sourceRow:null,version:1};}
+function trade(sequence:number,date:string,pnl:string):Trade{return {id:String(sequence),accountId,sequence,date,tradeTime:'09:30:00',grossPnl:pnl,commission:'0',pnl,symbol:'EUR/USD',riskPercent:null,rewardRisk:null,duration:null,notes:'',feelings:'',evidenceUrl:'',additionalEvidenceUrls:[],evidencePath:'',additionalEvidencePaths:[],strategy:'Breakout',setupGrade:'A+',mindset:'fear',direction:'',session:'',tags:'',sourceRow:null,version:1};}
 
 describe('trade review additions',()=>{
  it('defaults from local calendar fields without converting through UTC',()=>{
@@ -20,6 +20,12 @@ describe('trade review additions',()=>{
   expect(parsed).toMatchObject({date:'2026-10-17',setupGrade:'B+',mindset:'fear',feelings:'Entered too early.'});
   expect(tradeSchema.safeParse({accountId,date:'2026-10-17',setupGrade:'C'}).success).toBe(false);
   expect(tradeSchema.safeParse({accountId,date:'2026-10-17',mindset:'revenge'}).success).toBe(false);
+ });
+ it('normalizes either commission sign to a cost and keeps Gross + Commission = Net',()=>{
+  const positive=tradeSchema.parse({accountId,grossPnl:'100',commission:'12.5',tradeTime:'09:30'}),negative=tradeSchema.parse({accountId,grossPnl:'100',commission:'-12.5',tradeTime:'09:30'});
+  expect(positive.commission).toBe('-12.5');expect(negative.commission).toBe('-12.5');
+  expect(Number(positive.grossPnl)+Number(positive.commission)).toBe(87.5);
+  expect(tradeSchema.safeParse({accountId,tradeTime:'25:00'}).success).toBe(false);
  });
  it('moves a changed Trade Date to the correct calendar day',()=>{
   const record=trade(1,'2026-10-21','25');

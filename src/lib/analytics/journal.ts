@@ -37,6 +37,8 @@ export function calculateAnalytics(trades: Trade[], account: Pick<TradingAccount
  const breakEven = completed.filter(t=>classify(t.pnl,account.breakEvenBand)==='breakeven');
  const totalOf = (ts: Trade[]) => sum(ts.map(t=>t.pnl!)).toNumber();
  const net = sum(completed.map(t=>t.pnl!));
+ const totalGrossResult=sum(completed.map(t=>t.grossPnl??t.pnl!)).toNumber();
+ const totalCommissions=sum(completed.map(t=>t.commission||'0')).toNumber();
  let cumulative = new D(0), peak = new D(0), maxDrawdown = new D(0);
  const equity = [{sequence:0, label:'Start', balance:initial.toNumber(), pnl:0, growth:0, drawdown:0, date:null as string|null}];
  for (const trade of completed) {
@@ -73,7 +75,7 @@ export function calculateAnalytics(trades: Trade[], account: Pick<TradingAccount
   total:completed.length,open:ordered.length-completed.length,wins:wins.length,losses:losses.length,breakEven:breakEven.length,
   winRate:wins.length+losses.length ? wins.length/(wins.length+losses.length) : 0,
   lossRate:completed.length?losses.length/completed.length:0,breakEvenRate:completed.length?breakEven.length/completed.length:0,
-  netProfit:net.toNumber(),balance:initial.plus(net).toNumber(),roi:net.div(initial).times(100).toNumber(),
+  netProfit:net.toNumber(),totalGrossResult,totalCommissions,balance:initial.plus(net).toNumber(),roi:net.div(initial).times(100).toNumber(),
   winTotal:totalOf(wins),lossTotal:totalOf(losses),breakEvenTotal:totalOf(breakEven),
   averageWin,averageLoss:mean(losses.map(t=>t.pnl!)),averageBreakEven:mean(breakEven.map(t=>t.pnl!)),
   averagePlannedR:mean(ordered.flatMap(t=>t.rewardRisk===null?[]:[t.rewardRisk])),
