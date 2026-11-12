@@ -148,6 +148,7 @@ test('account types, independent challenge phases, editing and rule summaries wo
  await owner.patch('/api/preferences',{data:{theme:'dark',accountId}});for(const id of [...createdIds,challengeId])expect((await owner.delete(`/api/accounts/${id}`)).status()).toBe(200);
 });
 test('News stays authenticated and renders localized FMP market intelligence responsively',async({page,request})=>{
+ const errors:string[]=[];page.on('pageerror',event=>errors.push(event.message));page.on('console',entry=>{if(entry.type()==='error')errors.push(entry.text());});
  expect((await request.get('/api/news?category=latest&page=0')).status()).toBe(401);
  const providerResponse=await owner.get('/api/news?category=latest&page=0');
  const providerRequired=process.env.EXPECT_LIVE_NEWS==='1'||Boolean(process.env.FMP_API_KEY?.trim());
@@ -157,18 +158,21 @@ test('News stays authenticated and renders localized FMP market intelligence res
   expect(providerPayload).toMatchObject({status:expect.stringMatching(/^(ok|stale)$/),category:'latest'});
   expect(providerPayload.articles.length).toBeGreaterThan(0);
  }
- const state=await owner.storageState();await page.context().addCookies(state.cookies);
- await page.route('**/api/news?*',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({status:'ok',category:'latest',availableCategories:['latest','stocks','forex','crypto'],checkedAt:'2026-11-02T15:00:00Z',fetchedAt:'2026-11-02T15:00:00Z',page:0,hasMore:false,articles:[
+ const state=await owner.storageState();await page.context().addCookies(state.cookies);let newsMode:'ok'|'empty'|'error'='ok';
+ await page.route('**/api/news?*',async route=>{await new Promise(resolve=>setTimeout(resolve,180));if(newsMode==='error')return route.fulfill({status:503,contentType:'application/json',body:'{"error":"unavailable"}'});return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({status:'ok',category:'latest',availableCategories:['latest','stocks','forex','crypto'],checkedAt:'2026-11-02T15:00:00Z',fetchedAt:'2026-11-02T15:00:00Z',page:0,hasMore:false,articles:newsMode==='empty'?[]:[
   {id:'latest:1',title:'Markets prepare for central-bank decisions',description:'Rates and currency volatility are in focus.',publishedAt:'2026-11-02T14:00:00.000Z',source:'Financial Modeling Prep',author:'FMP Research',imageUrl:null,articleUrl:'https://financialmodelingprep.com/market-news/sample',tickers:['EURUSD'],category:'latest'},
   {id:'latest:2',title:'Technology shares extend gains',description:'Semiconductor shares led the session.',publishedAt:'2026-11-02T13:30:00.000Z',source:'Market Source',author:null,imageUrl:null,articleUrl:'https://example.com/article',tickers:['AAPL'],category:'latest'},
- ]})}));
- await page.goto('/news');await expect(page.getByRole('heading',{name:'Market Intelligence'})).toBeVisible();await expect(page.getByRole('heading',{name:'Markets prepare for central-bank decisions'})).toBeVisible();await expect(page.locator('.market-news-lead,.market-news-row')).toHaveCount(2);await expect(page.getByLabel('Trading discipline reminders')).toBeVisible();
- await expect(page.getByRole('tab',{name:'Stocks'})).toBeVisible();await expect(page.getByRole('link',{name:/Read Article\s*: Markets prepare/})).toHaveAttribute('href','https://financialmodelingprep.com/market-news/sample');
- await page.getByLabel('Search news').fill('Technology');await expect(page.locator('.market-news-lead,.market-news-row')).toHaveCount(1);await expect(page.getByRole('heading',{name:'Technology shares extend gains'})).toBeVisible();await page.getByLabel('Search news').fill('');
+ ]})});});
+ await page.goto('/news');await expect(page.getByLabel('Loading…')).toBeVisible();await expect(page.getByRole('heading',{name:'Market Intelligence'})).toBeVisible();await expect(page.getByRole('heading',{name:'Markets prepare for central-bank decisions'})).toBeVisible();await expect(page.locator('.news-briefing,.news-timeline-row')).toHaveCount(2);await expect(page.getByLabel('Trading discipline reminders')).toBeVisible();await expect(page.getByText('LIVE FEED',{exact:true})).toBeVisible();
+ await expect(page.getByRole('tab',{name:'Stocks'})).toBeVisible();const articleLink=page.getByRole('link',{name:/Read Article\s*: Markets prepare/});await expect(articleLink).toHaveAttribute('href','https://financialmodelingprep.com/market-news/sample');await expect(articleLink).toHaveAttribute('rel','noopener noreferrer');
+ await page.getByLabel('Search news').fill('Technology');await expect(page.locator('.news-briefing,.news-timeline-row')).toHaveCount(1);await expect(page.getByRole('heading',{name:'Technology shares extend gains'})).toBeVisible();await page.getByLabel('Search news').fill('No result');await expect(page.getByRole('heading',{name:'No articles match this search.'})).toBeVisible();await page.getByLabel('Search news').fill('');
+ newsMode='empty';await page.reload();await expect(page.getByRole('heading',{name:'No market news is available right now.'})).toBeVisible();newsMode='error';await page.reload();await expect(page.getByRole('heading',{name:'Market news is temporarily unavailable.'})).toBeVisible();expect(errors).toEqual([expect.stringContaining('503')]);errors.length=0;newsMode='ok';await page.reload();await expect(page.getByRole('heading',{name:'Markets prepare for central-bank decisions'})).toBeVisible();
  await page.getByLabel('Language').selectOption('es');await expect(page.getByRole('heading',{name:'Inteligencia de Mercado'})).toBeVisible();await expect(page.getByRole('link',{name:'Noticias',exact:true})).toBeVisible();await expect(page.getByLabel('Buscar noticias')).toBeVisible();
  for(const theme of ['light','dark','system']){await page.getByLabel('Tema de color').selectOption(theme);expect(['light','dark']).toContain(await page.getAttribute('html','data-theme'));}
+ await page.getByLabel('Tema de color').selectOption('dark');await page.setViewportSize({width:1366,height:900});await page.screenshot({path:'.data/news-redesign-desktop.png',fullPage:true});await page.setViewportSize({width:390,height:844});await page.screenshot({path:'.data/news-redesign-mobile.png',fullPage:true});
  for(const width of [320,768,1366]){await page.setViewportSize({width,height:900});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);}
  const axe=await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa']).disableRules(['color-contrast']).analyze();expect(axe.violations.map(item=>item.id)).toEqual([]);
+ expect(errors).toEqual([]);
 });
 test('concurrent operation creation uses unique sequences',async()=>{
  const a=await (await owner.post('/api/accounts',{data:ownCapitalAccount('Concurrency test')})).json();
@@ -339,6 +343,16 @@ test('authenticated shell stays usable at 100% zoom across desktop, tablet and m
   if(width>900){const logout=page.locator('.sidebar .profile-logout');await expect(logout).toBeVisible();const box=await logout.boundingBox();expect(box).not.toBeNull();expect(box!.y+box!.height).toBeLessThanOrEqual(height);}
   else await expect(page.getByRole('button',{name:'Open navigation'})).toBeVisible();
  }
+});
+test('the shared discipline ticker appears once on user routes and never on Admin',async({page})=>{
+ const state=await owner.storageState();await page.context().addCookies(state.cookies);await page.goto('/dashboard');await page.getByLabel(/Language|Idioma/).selectOption('en');
+ await expect(page.getByLabel('Trading discipline reminders')).toHaveCount(1);
+ for(const link of ['Trading journal','Statistics','Calendar','News','Monte Carlo','Funded accounts','Review','Settings','Overview']){
+  await page.getByRole('link',{name:link,exact:true}).first().click();
+  await expect(page.getByLabel('Trading discipline reminders')).toHaveCount(1);
+ }
+ await page.context().clearCookies();const adminState=await fullAdmin.storageState();await page.context().addCookies(adminState.cookies);await page.goto('/admin');
+ await expect(page.getByRole('heading',{name:'Admin dashboard'})).toBeVisible();await expect(page.locator('.quote-ticker')).toHaveCount(0);
 });
 test('registration submits once and locks after a confirmation email is issued',async({page})=>{
  let requests=0;
