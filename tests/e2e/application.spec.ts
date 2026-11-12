@@ -69,11 +69,12 @@ test('full admin dashboard is role-gated, aggregate-only, localized and responsi
  const review=await owner.post('/api/reviews',{data:{reviewText:'Admin dashboard moderation test.'}});expect(review.status(),await review.text()).toBe(201);
  const rejectedReview=await outsider.post('/api/reviews',{data:{reviewText:'Admin dashboard rejection test.'}});expect(rejectedReview.status(),await rejectedReview.text()).toBe(201);
  const response=await fullAdmin.get('/api/admin?range=30d&userPage=1&reviewStatus=pending&reviewPage=1');expect(response.status(),await response.text()).toBe(200);
- const payload=await response.json();expect(payload.kpis.totalUsers).toBeGreaterThanOrEqual(3);expect(payload.kpis.weeklyActiveUsers).toBeGreaterThanOrEqual(1);expect(payload.features).toHaveLength(9);expect(payload.featureTimeline.some((point:{feature:string})=>point.feature==='monte_carlo')).toBe(true);expect(payload.features.find((feature:{feature:string})=>feature.feature==='overview').distinct_users).toBeGreaterThanOrEqual(1);expect(payload.news.views).toBeGreaterThanOrEqual(1);expect(payload.news.articleOpens).toBeGreaterThanOrEqual(1);expect(payload.news.uniqueReaders).toBeGreaterThanOrEqual(1);expect(payload.news.categories).toContainEqual(expect.objectContaining({category:'stocks',opens:expect.any(Number)}));
+ const payload=await response.json();expect(payload.kpis.totalUsers).toBeGreaterThanOrEqual(3);expect(payload.kpis.totalEvents).toBeGreaterThanOrEqual(1);expect(payload.kpis.weeklyActiveUsers).toBeGreaterThanOrEqual(1);expect(payload.features).toHaveLength(9);expect(payload.featureTimeline.some((point:{feature:string})=>point.feature==='monte_carlo')).toBe(true);expect(payload.features.find((feature:{feature:string})=>feature.feature==='overview').distinct_users).toBeGreaterThanOrEqual(1);expect(payload.news.views).toBeGreaterThanOrEqual(1);expect(payload.news.articleOpens).toBeGreaterThanOrEqual(1);expect(payload.news.uniqueReaders).toBeGreaterThanOrEqual(1);expect(payload.news.categories).toContainEqual(expect.objectContaining({category:'stocks',opens:expect.any(Number)}));
  const serialized=JSON.stringify(payload);expect(serialized).not.toContain(credentials.email);expect(serialized).not.toContain(testUserIds[0]);
  const client=createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,{auth:{persistSession:false,autoRefreshToken:false}});expect((await client.auth.signInWithPassword({email:`admin-${credentials.email}`,password:credentials.password})).error).toBeNull();const raw=await client.from('analytics_events').select('*');expect(raw.error).not.toBeNull();expect(raw.data).toBeNull();await client.auth.signOut({scope:'local'});
  const normalState=await owner.storageState();await page.context().addCookies(normalState.cookies);await page.goto('/admin');await expect(page).toHaveURL(/\/admin$/);await expect(page.getByRole('heading',{name:'This page isn’t here'})).toBeVisible();
  await page.context().clearCookies();const state=await fullAdmin.storageState();await page.context().addCookies(state.cookies);await page.goto('/admin');await expect(page.getByRole('heading',{name:'Admin dashboard'})).toBeVisible();await expect(page.getByRole('link',{name:'Admin',exact:true})).toBeVisible();await expect(page.getByText('Most used tool')).toBeVisible();await expect(page.getByText('News views')).toBeVisible();await expect(page.getByText('Top news category · Stocks')).toBeVisible();
+ const range=page.getByLabel('Date range');for(const value of ['7d','30d','all']){const responsePromise=page.waitForResponse(response=>response.url().includes(`/api/admin?range=${value}`));await range.selectOption(value);const rangeResponse=await responsePromise;expect(rangeResponse.status()).toBe(200);expect(new URL(rangeResponse.url()).searchParams.get('range')).toBe(value);}
  await page.getByRole('tab',{name:/Analytics/}).click();await expect(page.getByText('Feature usage over time')).toBeVisible();
  await page.getByRole('tab',{name:/Reviews/}).click();await expect(page.getByLabel('Status')).toHaveValue('pending');await expect(page.getByText('Admin dashboard moderation test.')).toBeVisible();await page.locator('.admin-review-card').filter({hasText:'Admin dashboard moderation test.'}).getByRole('button',{name:'Approve',exact:true}).click();await expect(page.getByText('Review status updated.')).toBeVisible();
  await page.locator('.admin-review-card').filter({hasText:'Admin dashboard rejection test.'}).getByRole('button',{name:'Reject',exact:true}).click();await expect(page.getByText('Review status updated.')).toBeVisible();
@@ -98,6 +99,9 @@ test('authenticated parity, validation, isolated access and conflicting edits',a
  expect((await owner.post('/api/instruments',{data:{name:'eur/usd'}})).status()).toBe(409);
  expect((await outsider.delete(`/api/instruments?id=${instrument.id}`)).status()).toBe(404);
  const instrumentsWorkspace=await (await owner.get(`/api/workspace?accountId=${accountId}`)).json();expect(instrumentsWorkspace.instruments).toContainEqual(expect.objectContaining({id:instrument.id,name:'EUR/USD'}));
+ const strategyResponse=await owner.post('/api/strategies',{data:{name:'Breakout'}});expect(strategyResponse.status(),await strategyResponse.text()).toBe(201);const strategy=await strategyResponse.json();expect(strategy.name).toBe('Breakout');
+ expect((await owner.post('/api/strategies',{data:{name:'breakout'}})).status()).toBe(409);expect((await outsider.delete(`/api/strategies?id=${strategy.id}`)).status()).toBe(404);
+ const strategiesWorkspace=await (await owner.get(`/api/workspace?accountId=${accountId}`)).json();expect(strategiesWorkspace.strategies).toContainEqual(expect.objectContaining({id:strategy.id,name:'Breakout'}));
  const account=await (await owner.post('/api/accounts',{data:ownCapitalAccount('Lifecycle test','1000','10')})).json();
  const created=await owner.post('/api/trades',{data:{accountId:account.id,symbol:'TEST',grossPnl:'150',commission:'25',tradeTime:'09:30',riskPercent:'.01',rewardRisk:'2'}});
  // Decimal input requires a leading zero.
@@ -158,9 +162,9 @@ test('News stays authenticated and renders localized FMP market intelligence res
   {id:'latest:1',title:'Markets prepare for central-bank decisions',description:'Rates and currency volatility are in focus.',publishedAt:'2026-11-02T14:00:00.000Z',source:'Financial Modeling Prep',author:'FMP Research',imageUrl:null,articleUrl:'https://financialmodelingprep.com/market-news/sample',tickers:['EURUSD'],category:'latest'},
   {id:'latest:2',title:'Technology shares extend gains',description:'Semiconductor shares led the session.',publishedAt:'2026-11-02T13:30:00.000Z',source:'Market Source',author:null,imageUrl:null,articleUrl:'https://example.com/article',tickers:['AAPL'],category:'latest'},
  ]})}));
- await page.goto('/news');await expect(page.getByRole('heading',{name:'Market Intelligence'})).toBeVisible();await expect(page.getByRole('heading',{name:'Markets prepare for central-bank decisions'})).toBeVisible();await expect(page.locator('.market-news-card')).toHaveCount(2);
+ await page.goto('/news');await expect(page.getByRole('heading',{name:'Market Intelligence'})).toBeVisible();await expect(page.getByRole('heading',{name:'Markets prepare for central-bank decisions'})).toBeVisible();await expect(page.locator('.market-news-lead,.market-news-row')).toHaveCount(2);await expect(page.getByLabel('Trading discipline reminders')).toBeVisible();
  await expect(page.getByRole('tab',{name:'Stocks'})).toBeVisible();await expect(page.getByRole('link',{name:/Read Article\s*: Markets prepare/})).toHaveAttribute('href','https://financialmodelingprep.com/market-news/sample');
- await page.getByLabel('Search news').fill('Technology');await expect(page.locator('.market-news-card')).toHaveCount(1);await expect(page.getByRole('heading',{name:'Technology shares extend gains'})).toBeVisible();await page.getByLabel('Search news').fill('');
+ await page.getByLabel('Search news').fill('Technology');await expect(page.locator('.market-news-lead,.market-news-row')).toHaveCount(1);await expect(page.getByRole('heading',{name:'Technology shares extend gains'})).toBeVisible();await page.getByLabel('Search news').fill('');
  await page.getByLabel('Language').selectOption('es');await expect(page.getByRole('heading',{name:'Inteligencia de Mercado'})).toBeVisible();await expect(page.getByRole('link',{name:'Noticias',exact:true})).toBeVisible();await expect(page.getByLabel('Buscar noticias')).toBeVisible();
  for(const theme of ['light','dark','system']){await page.getByLabel('Tema de color').selectOption(theme);expect(['light','dark']).toContain(await page.getAttribute('html','data-theme'));}
  for(const width of [320,768,1366]){await page.setViewportSize({width,height:900});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);}
@@ -232,6 +236,8 @@ test('calendar follows dated journal changes and keeps account ownership',async(
  expect((await owner.delete(`/api/accounts/${account.id}`)).status()).toBe(200);
 });
 test('trade time, commission accounting, four private evidence slots, Quick Look, and PDF persist',async({page})=>{
+ const strategySeed=await owner.post('/api/strategies',{data:{name:'Breakout'}});expect([201,409]).toContain(strategySeed.status());
+ const instrumentSeed=await owner.post('/api/instruments',{data:{name:'EUR/USD'}});expect([201,409]).toContain(instrumentSeed.status());
  const created=await owner.post('/api/accounts',{data:ownCapitalAccount('Review fields test','10000')});
  expect(created.status(),await created.text()).toBe(201);
  const account=await created.json();
@@ -252,12 +258,16 @@ test('trade time, commission accounting, four private evidence slots, Quick Look
  const state=await owner.storageState();await page.context().addCookies(state.cookies);await page.goto('/journal');
  await page.getByRole('button',{name:`View operation ${record.sequence}`}).click();
  const details=page.getByRole('dialog');const definitions=details.locator('dd');await expect(definitions.filter({hasText:'09:30'})).toBeVisible();await expect(definitions.filter({hasText:'+$150.00'})).toBeVisible();await expect(definitions.filter({hasText:'-$25.00'})).toBeVisible();await expect(definitions.filter({hasText:'+$125.00'})).toBeVisible();
- const fourthPreview=page.getByRole('button',{name:'Open evidence preview 4'});await expect(fourthPreview).toBeVisible();await fourthPreview.click();
+ const fourthPreview=page.getByRole('button',{name:'Open evidence preview: Model Entry'});await expect(fourthPreview).toBeVisible();await fourthPreview.click();
  await expect(page.getByRole('button',{name:'Close evidence preview'})).toBeVisible();await page.keyboard.press('Escape');await expect(fourthPreview).toBeFocused();
  await fourthPreview.click();await page.getByRole('button',{name:'Close evidence preview'}).click();await expect(fourthPreview).toBeFocused();
  await page.getByRole('button',{name:'Edit operation'}).click();await expect(page.locator('.evidence-slot')).toHaveCount(4);
+ await expect(page.locator('.evidence-slot-heading strong')).toHaveText(['Direction','Context','Narrative','Model Entry']);
+ await page.getByLabel('Instrument',{exact:true}).click();await expect(page.getByRole('listbox',{name:'Saved instruments'}).getByRole('option',{name:/EUR\/USD/})).toBeVisible();await expect(page.locator('.saved-instrument-list')).toHaveCount(0);
+ await page.getByLabel('Strategy / setup').click();await expect(page.getByRole('listbox',{name:'Saved strategies'}).getByRole('option',{name:/Breakout/})).toBeVisible();
+ await expect(page.getByLabel('Session').locator('option')).toContainText(['Unspecified','Asia','Sydney','London','New York','Other']);
  await page.getByLabel('Choose image 2').setInputFiles({name:'selected.png',mimeType:'image/png',buffer:png});
- await expect(page.locator('.evidence-slot').nth(1)).toContainText('Selected');await expect(page.getByRole('button',{name:'Open evidence preview 2'})).toHaveCount(0);
+ await expect(page.locator('.evidence-slot').nth(1)).toContainText('Selected');await expect(page.getByRole('button',{name:'Open evidence preview: Context'})).toHaveCount(0);
  for(const width of [320,768,1366]){await page.setViewportSize({width,height:900});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);}
  await page.getByRole('button',{name:'Cancel'}).click();
  const calendar=await (await owner.get(`/api/calendar?accountId=${account.id}&month=2026-10`)).json();
@@ -266,9 +276,9 @@ test('trade time, commission accounting, four private evidence slots, Quick Look
  expect(report.status(),await report.text()).toBe(200);expect(report.headers()['content-type']).toContain('application/pdf');
  const pdf=await report.body();expect(pdf.subarray(0,5).toString()).toBe('%PDF-');
  expect((pdf.toString('latin1').match(/\/Type \/Page\b/g)||[]).length).toBeGreaterThanOrEqual(5);
- const edited=await owner.patch(`/api/trades/${record.id}`,{data:{accountId:account.id,date:'2026-10-17',tradeTime:'10:15',symbol:'EUR/USD',grossPnl:'145',commission:'20',setupGrade:'B+',mindset:'neutral',feelings:'Followed the plan.',version:record.version}});
+ const edited=await owner.patch(`/api/trades/${record.id}`,{data:{accountId:account.id,date:'2026-10-17',tradeTime:'10:15',symbol:'EUR/USD',grossPnl:'145',commission:'20',setupGrade:'B+',mindset:'neutral',feelings:'Followed the plan.',session:'Sydney',version:record.version}});
  expect(edited.status(),await edited.text()).toBe(200);
- expect(await edited.json()).toMatchObject({date:'2026-10-17',tradeTime:'10:15:00',grossPnl:'145.00000000',commission:'-20.00000000',pnl:'125.00000000',setupGrade:'B+',mindset:'neutral',feelings:'Followed the plan.',additionalEvidenceUrls:evidenceLinks});
+ expect(await edited.json()).toMatchObject({date:'2026-10-17',tradeTime:'10:15:00',grossPnl:'145.00000000',commission:'-20.00000000',pnl:'125.00000000',setupGrade:'B+',mindset:'neutral',feelings:'Followed the plan.',session:'Sydney',additionalEvidenceUrls:evidenceLinks});
  const moved=await (await owner.get(`/api/calendar?accountId=${account.id}&month=2026-10`)).json();expect(moved.trades[0].date).toBe('2026-10-17');
  expect((await owner.delete(`/api/trades/${record.id}/evidence?slot=4`)).status()).toBe(200);
  expect((await owner.get(`/api/trades/${record.id}/evidence?slot=4`)).status()).toBe(404);expect((await owner.get(`/api/trades/${record.id}/evidence?slot=1`)).status()).toBe(200);
@@ -299,7 +309,7 @@ test('secure public trade sharing exposes only the allowlist and revokes immedia
  expect((await request.get(`/api/share/${token}/evidence?slot=2`)).status()).toBe(404);
  const changedToken=`${token.slice(0,-1)}${token.at(-1)==='A'?'B':'A'}`;const invalid=await request.get(`/share/${changedToken}`);expect(invalid.status()).toBe(200);expect(await invalid.text()).not.toContain('SHARE/USD');
  await page.context().clearCookies();await page.goto(url);await expect(page.getByRole('heading',{name:'Operation #1'})).toBeVisible();await expect(page.getByRole('link',{name:/TRADEDATA/})).toHaveAttribute('href','https://tradingdata.tech/');await expect(page.getByRole('link',{name:'Overview'})).toHaveCount(0);
- const preview=page.getByRole('button',{name:'Open evidence preview 1'});await preview.click();await expect(page.getByRole('button',{name:'Close evidence preview'})).toBeVisible();await page.keyboard.press('Escape');await expect(preview).toBeFocused();
+ const preview=page.getByRole('button',{name:'Open evidence preview: Direction'});await preview.click();await expect(page.getByRole('button',{name:'Close evidence preview'})).toBeVisible();await page.keyboard.press('Escape');await expect(preview).toBeFocused();
  for(const width of [320,768,1366]){await page.setViewportSize({width,height:900});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);}
  for(const theme of ['light','dark','system']){await page.getByLabel('Color theme').selectOption(theme);expect(['light','dark']).toContain(await page.getAttribute('html','data-theme'));}
  await page.getByLabel('Language').selectOption('es');await expect(page.getByRole('heading',{name:'Operación #1'})).toBeVisible();
@@ -321,6 +331,22 @@ test('review submission, moderation and public publication remain ownership-scop
  const tamper=await client.from('review_submissions').update({status:'rejected'}).eq('id',otherReview.id).select();expect(tamper.error).toBeNull();expect(tamper.data).toEqual([]);
  await client.auth.signOut({scope:'local'});
 });
+test('authenticated shell stays usable at 100% zoom across desktop, tablet and mobile viewports',async({page})=>{
+ const state=await owner.storageState();await page.context().addCookies(state.cookies);await page.goto('/dashboard');
+ for(const {width,height} of [{width:2560,height:1440},{width:1920,height:1080},{width:1680,height:1050},{width:1440,height:900},{width:1366,height:768},{width:1280,height:800},{width:900,height:1024},{width:768,height:1024},{width:390,height:844}]){
+  await page.setViewportSize({width,height});
+  expect(await page.evaluate(()=>({horizontal:document.documentElement.scrollWidth>window.innerWidth,zoom:window.devicePixelRatio}))).toMatchObject({horizontal:false});
+  if(width>900){const logout=page.locator('.sidebar .profile-logout');await expect(logout).toBeVisible();const box=await logout.boundingBox();expect(box).not.toBeNull();expect(box!.y+box!.height).toBeLessThanOrEqual(height);}
+  else await expect(page.getByRole('button',{name:'Open navigation'})).toBeVisible();
+ }
+});
+test('registration submits once and locks after a confirmation email is issued',async({page})=>{
+ let requests=0;
+ await page.route('**/api/auth/sign-up/email',async route=>{requests++;await new Promise(resolve=>setTimeout(resolve,150));await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({requiresConfirmation:true})});});
+ await page.goto('/register');await page.getByLabel('Your name').fill('New Trader');await page.getByLabel('Email address').fill('new-trader@example.test');await page.getByLabel('Password',{exact:true}).fill('A-secure-password-123');
+ await page.locator('form').evaluate(form=>{const element=form as HTMLFormElement;element.requestSubmit();element.requestSubmit();});
+ await expect(page.getByText('Check your email to confirm your account, then sign in.')).toBeVisible();expect(requests).toBe(1);await expect(page.getByRole('button',{name:/Confirmation email sent/})).toBeDisabled();
+});
 test('public authentication navigation and Google OAuth initiation are complete',async({page,request})=>{
  await page.goto('/');const lightLogo=page.locator('.landing-header .brand-logo-light'),darkLogo=page.locator('.landing-header .brand-logo-dark');await expect(lightLogo).toHaveAttribute('src',/logo3\.png/);await expect(darkLogo).toHaveAttribute('src',/logo2\.png/);await page.getByLabel('Color theme').selectOption('light');await expect(lightLogo).toBeVisible();await expect(darkLogo).toBeHidden();await page.getByLabel('Color theme').selectOption('dark');await expect(darkLogo).toBeVisible();await expect(lightLogo).toBeHidden();await page.emulateMedia({colorScheme:'dark'});await page.getByLabel('Color theme').selectOption('system');await expect(darkLogo).toBeVisible();await page.emulateMedia({colorScheme:'light'});await expect(lightLogo).toBeVisible();const icon=await request.get('/icon.png');expect(icon.status()).toBe(200);expect(icon.headers()['content-type']).toContain('image/png');await page.getByRole('link',{name:'Log in',exact:true}).click();await expect(page).toHaveURL(/\/login$/);
  await expect(page.getByRole('button',{name:'Continue with Google',exact:true})).toBeVisible();await expect(page.getByRole('link',{name:'Back to Home',exact:true})).toBeVisible();
@@ -336,7 +362,7 @@ test('main application copy switches between English and Spanish without reload'
  await page.getByLabel('Idioma').selectOption('en');await expect(page.getByRole('heading',{name:'The bigger picture.'})).toBeVisible();
  await page.getByLabel('Language').selectOption('es');
  for(const [path,heading] of [['/journal','Diario de trading'],['/statistics','Conoce tus números'],['/calendar','Calendario de trading'],['/monte-carlo','Una estrategia. Muchas posibilidades.'],['/funded-accounts','Conoce el costo de la oportunidad.'],['/review','Comparte tu reseña'],['/settings','Configuración']] as const){await page.goto(path);await expect(page.getByRole('heading',{name:heading})).toBeVisible();}
- await page.goto('/journal');await page.getByRole('button',{name:'Registrar operación',exact:true}).first().click();await expect(page.getByRole('dialog')).toContainText('Haz una pausa antes de registrar');await page.getByRole('button',{name:'Continuar',exact:true}).click();await page.getByText('Contexto y revisión').click();await expect(page.getByLabel('Dirección')).toBeVisible();await expect(page.getByLabel('Dirección').locator('option[value="long"]')).toHaveText('Long');await expect(page.getByLabel('Dirección').locator('option[value="short"]')).toHaveText('Short');await page.getByRole('button',{name:'Cancelar',exact:true}).click();
+ await page.goto('/journal');await page.getByRole('button',{name:'Registrar operación',exact:true}).first().click();await expect(page.getByRole('dialog')).toContainText('Haz una pausa antes de registrar');await page.getByRole('button',{name:'Continuar',exact:true}).click();await page.getByText('Contexto y revisión').click();const direction=page.locator('select[name="direction"]');await expect(direction).toBeVisible();await expect(direction.locator('option[value="long"]')).toHaveText('Long');await expect(direction.locator('option[value="short"]')).toHaveText('Short');await page.getByRole('button',{name:'Cancelar',exact:true}).click();
 });
 test('login, import parity, journal filters, editing, saving and deletion through UI',async({page})=>{
  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
@@ -364,21 +390,21 @@ test('login, import parity, journal filters, editing, saving and deletion throug
  await page.getByLabel('Trade date').fill('2026-10-17');await page.getByLabel('Instrument',{exact:true}).fill('QA/USD');await page.getByLabel('Gross result (USD)').fill('125');await page.getByLabel('Risk per trade (%)').fill('1');await page.getByLabel('Planned reward / risk (R)').fill('2');
  await page.getByLabel('Setup grade').selectOption('A+');await page.getByLabel('Mindset & execution').selectOption('fear');await page.getByLabel('Mindset note (optional)').fill('Waited for the setup.');
  await expect(page.getByLabel('Strategy / setup')).toHaveCount(1);
- await expect(page.getByLabel('Direction')).toBeVisible();await page.getByLabel('Direction').selectOption('long');
+ const direction=page.locator('select[name="direction"]');await expect(direction).toBeVisible();await direction.selectOption('long');
  await expect(page.getByLabel('Tags')).toHaveCount(0);
  await page.getByLabel('Strategy / setup').fill('Breakout');
- await page.getByLabel('Evidence link 1').fill('https://example.com/one');
- await page.getByLabel('Evidence link 2').fill('https://example.com/two');
- await page.getByLabel('Evidence link 3').fill('https://example.com/three');
- await page.getByLabel('Evidence link 4').fill('https://example.com/four');
+ await page.getByLabel('Direction link').fill('https://example.com/one');
+ await page.getByLabel('Context link').fill('https://example.com/two');
+ await page.getByLabel('Narrative link').fill('https://example.com/three');
+ await page.getByLabel('Model Entry link').fill('https://example.com/four');
  await page.getByLabel('Paste a chart screenshot here, or choose an image.',{exact:true}).evaluate(node=>{
   const png=Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/f2kAAAAASUVORK5CYII='),c=>c.charCodeAt(0));
   const transfer=new DataTransfer();transfer.items.add(new File([png],'chart.png',{type:'image/png'}));
   node.dispatchEvent(new ClipboardEvent('paste',{bubbles:true,cancelable:true,clipboardData:transfer}));
  });
- await expect(page.getByAltText('Selected evidence image 1')).toBeVisible();
+ await expect(page.getByAltText('Selected evidence image: Direction')).toBeVisible();
  await page.getByRole('button',{name:'Record operation',exact:true}).last().click();await expect(page.getByRole('dialog')).not.toBeVisible();
- await page.getByLabel('Search operations').fill('QA/USD');await page.getByText('QA/USD',{exact:true}).click();await expect(page.getByText('Waited for the setup.')).toBeVisible();await expect(page.getByText('Long',{exact:true})).toBeVisible();await expect(page.getByAltText('Trade evidence screenshot')).toBeVisible();for(const index of [1,2,3,4])await expect(page.getByRole('link',{name:`Open trade evidence ${index}`})).toBeVisible();await page.getByRole('button',{name:'Edit operation',exact:true}).click();await expect(page.getByLabel('Direction')).toHaveValue('long');await page.getByLabel('Direction').selectOption('short');for(const [index,path] of [[1,'one'],[2,'two'],[3,'three'],[4,'four']] as const)await expect(page.getByLabel(`Evidence link ${index}`)).toHaveValue(`https://example.com/${path}`);await page.getByLabel('Gross result (USD)').fill('150');await page.getByRole('button',{name:'Save changes',exact:true}).click();await expect(page.getByText('+$150.00',{exact:true})).toBeVisible();
+ await page.getByLabel('Search operations').fill('QA/USD');await page.getByText('QA/USD',{exact:true}).click();await expect(page.getByText('Waited for the setup.')).toBeVisible();await expect(page.getByText('Long',{exact:true})).toBeVisible();await expect(page.getByAltText('Trade evidence screenshot: Direction')).toBeVisible();for(const label of ['Direction','Context','Narrative','Model Entry'])await expect(page.getByRole('link',{name:`Open trade evidence: ${label}`})).toBeVisible();await page.getByRole('button',{name:'Edit operation',exact:true}).click();const editedDirection=page.locator('select[name="direction"]');await expect(editedDirection).toHaveValue('long');await editedDirection.selectOption('short');for(const [label,path] of [['Direction','one'],['Context','two'],['Narrative','three'],['Model Entry','four']] as const)await expect(page.getByLabel(`${label} link`)).toHaveValue(`https://example.com/${path}`);await page.getByLabel('Gross result (USD)').fill('150');await page.getByRole('button',{name:'Save changes',exact:true}).click();await expect(page.getByText('+$150.00',{exact:true})).toBeVisible();
  await page.reload();await expect(page.getByText('+$150.00',{exact:true})).toBeVisible();await page.getByText('QA/USD',{exact:true}).click();await expect(page.getByText('Short',{exact:true})).toBeVisible();await page.getByLabel('Close dialog').click();
  await page.getByRole('link',{name:'Monte Carlo',exact:true}).click();await expect(page.getByText('Possible account paths')).toBeVisible();await expect(page.locator('.simulation-chart svg')).toBeVisible();
  await page.getByRole('button',{name:'Save',exact:true}).click();await page.getByLabel('Scenario name').fill('Verified simulation');await page.getByRole('button',{name:'Save scenario',exact:true}).click();await expect(page.getByText('Scenario saved to your workspace.')).toBeVisible();
@@ -386,7 +412,7 @@ test('login, import parity, journal filters, editing, saving and deletion throug
  await page.getByRole('button',{name:'Save',exact:true}).click();await page.getByLabel('Scenario name').fill('Verified bankroll');await page.getByRole('button',{name:'Save scenario',exact:true}).click();await expect(page.getByRole('dialog')).not.toBeVisible();
  await page.reload();await page.getByRole('button',{name:'Saved scenarios',exact:true}).click();await page.getByRole('button',{name:/^Verified bankroll/}).click();await expect(page.getByLabel('Cost per account ($)')).toHaveValue('30');await expect(page.getByText('$90.00',{exact:true})).toBeVisible();
  expect(errors).toEqual([]);await page.getByRole('button',{name:'Log out'}).click();await expect(page).toHaveURL(base+'/');await page.goto('/journal');await expect(page).toHaveURL(/login/);
- await page.getByLabel('Email address').fill(credentials.email);await page.getByLabel('Password',{exact:true}).fill(credentials.password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page).toHaveURL(/dashboard/);await page.goto('/journal');await page.getByLabel('Search operations').fill('QA/USD');await page.getByText('QA/USD',{exact:true}).click();await expect(page.getByText('Short',{exact:true})).toBeVisible();const storedEvidence=page.getByAltText('Trade evidence screenshot');await expect(storedEvidence).toHaveJSProperty('complete',true);await expect.poll(()=>storedEvidence.evaluate(image=>(image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);await page.getByRole('button',{name:'Delete operation',exact:true}).click();await page.getByRole('button',{name:'Delete operation',exact:true}).click();await page.goto('/dashboard');await expect(page.getByText('$6,352.00',{exact:true})).toBeVisible();
+ await page.getByLabel('Email address').fill(credentials.email);await page.getByLabel('Password',{exact:true}).fill(credentials.password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page).toHaveURL(/dashboard/);await page.goto('/journal');await page.getByLabel('Search operations').fill('QA/USD');await page.getByText('QA/USD',{exact:true}).click();await expect(page.getByText('Short',{exact:true})).toBeVisible();const storedEvidence=page.getByAltText('Trade evidence screenshot: Direction');await expect(storedEvidence).toHaveJSProperty('complete',true);await expect.poll(()=>storedEvidence.evaluate(image=>(image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);await page.getByRole('button',{name:'Delete operation',exact:true}).click();await page.getByRole('button',{name:'Delete operation',exact:true}).click();await page.goto('/dashboard');await expect(page.getByText('$6,352.00',{exact:true})).toBeVisible();
  for(const path of ['/statistics','/calendar','/review','/settings']){await page.goto(path);await expect(page.locator('main#main')).toBeVisible();}
  expect(errors).toEqual([]);
 });

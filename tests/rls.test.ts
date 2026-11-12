@@ -95,6 +95,15 @@ test('gross result, commission cost and operation time are enforced at the datab
   expect(changed.rows[0].save_trade).toMatchObject({grossPnl:'150.00000000',commission:'-10.00000000',pnl:'140.00000000'});
  });
 });
+test('custom strategies stay custom until explicitly saved and remain owner isolated',async()=>{
+ await asUser(a,async()=>{
+  await db.query('select save_trade($1::jsonb)',[JSON.stringify({accountId,strategy:'Unsaved custom setup'})]);
+  expect((await db.query("select id from strategies where name='Unsaved custom setup'")).rows).toHaveLength(0);
+  await db.query("insert into strategies(user_id,name) values($1,'Explicit saved setup')",[a]);
+  expect((await db.query("select id from strategies where name='Explicit saved setup'")).rows).toHaveLength(1);
+ });
+ await asUser(b,async()=>expect((await db.query("select id from strategies where name='Explicit saved setup'")).rows).toHaveLength(0));
+});
 test('grade, mindset, note, and edited Trade Date persist through the view and RPC',async()=>{
  await asUser(a,async()=>{
   const created=await db.query<{save_trade:{id:string;version:number;date:string;setupGrade:string;mindset:string;feelings:string}}>('select save_trade($1::jsonb)',[JSON.stringify({accountId,date:'2026-10-21',setupGrade:'A+',mindset:'fear',feelings:'Entered too early'})]);
@@ -180,6 +189,7 @@ test('analytics are append-only through the validated RPC and raw events remain 
   await db.query("select record_analytics_event('news','news_filter_changed','{\"filter_name\":\"currency\"}'::jsonb)");
   await db.query("select record_analytics_event('news','news_article_opened','{\"category\":\"forex\"}'::jsonb)");
   await db.query("select record_analytics_event('trading_journal','instrument_saved','{}'::jsonb)");
+  await db.query("select record_analytics_event('trading_journal','strategy_saved','{}'::jsonb)");
   await expect(db.query('select * from analytics_events')).rejects.toThrow(/permission denied/);
   await expect(db.query("insert into analytics_events(user_id,feature,event_name) values($1,'overview','overview_viewed')",[b])).rejects.toThrow(/permission denied/);
   await expect(db.query("select record_analytics_event('overview','overview_viewed','{\"private_note\":\"no\"}'::jsonb)")).rejects.toThrow(/Unsupported analytics metadata key/);
@@ -193,6 +203,7 @@ test('analytics are append-only through the validated RPC and raw events remain 
 test('full-admin analytics are database-aggregated and denied to users and review admins',async()=>{
  await db.query('insert into user_roles(user_id,role) values($1,$2)',[c,'admin']);
  await db.query('insert into profiles(id,name) values($1,$2)',[c,'Full Admin']);
+ await db.query("insert into analytics_events(user_id,feature,event_name,created_at) values($1,'overview','overview_viewed',now()-interval '10 days'),($1,'overview','overview_viewed',now()-interval '60 days')",[b]);
  await asUser(b,async()=>await expect(db.query("select get_admin_dashboard('30d',1,'all',1)")).rejects.toThrow(/Administrator access required/));
  await asUser(a,async()=>await expect(db.query("select get_admin_dashboard('30d',1,'all',1)")).rejects.toThrow(/Administrator access required/));
  await asUser(c,async()=>{
@@ -202,6 +213,12 @@ test('full-admin analytics are database-aggregated and denied to users and revie
   expect(result.rows[0].get_admin_dashboard.features).toHaveLength(9);
   expect(result.rows[0].get_admin_dashboard.featureTimeline.length).toBeGreaterThanOrEqual(1);
   expect(result.rows[0].get_admin_dashboard.users.items.every(user=>!('id' in user)&&!('email' in user))).toBe(true);
+  const rangeTotals=[] as number[];
+  for(const range of ['7d','30d','all']){
+   const dashboard=(await db.query<{get_admin_dashboard:{features:{total_events:number}[]}}>(`select get_admin_dashboard('${range}',1,'all',1)`)).rows[0].get_admin_dashboard;
+   rangeTotals.push(dashboard.features.reduce((sum,feature)=>sum+feature.total_events,0));
+  }
+  expect(rangeTotals[0]).toBeLessThan(rangeTotals[1]);expect(rangeTotals[1]).toBeLessThan(rangeTotals[2]);
   const news=await db.query<{get_admin_news_analytics:{views:number;articleOpens:number;uniqueReaders:number;categories:{category:string;opens:number}[]}}>("select get_admin_news_analytics('30d')");
   expect(news.rows[0].get_admin_news_analytics).toMatchObject({articleOpens:1,uniqueReaders:1,categories:[{category:'forex',opens:1}]});
  });

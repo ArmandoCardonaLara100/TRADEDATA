@@ -8,6 +8,8 @@ import {number,signedMoney} from '@/lib/format';
 import {useLanguage,type MessageKey} from '@/lib/i18n';
 import type {SharedTrade} from '@/types/shared-trade';
 
+const evidenceLabelKeys=['journal.evidence.direction','journal.evidence.context','journal.evidence.narrative','journal.evidence.modelEntry'] as const;
+
 function value(value:string|number|null|undefined,suffix=''){return value===null||value===undefined||value===''?'—':`${value}${suffix}`;}
 
 export function SharedTradePage({token,trade}:{token:string;trade:SharedTrade|null}){
@@ -36,7 +38,7 @@ export function SharedTradePage({token,trade}:{token:string;trade:SharedTrade|nu
    <dl className="shared-trade-metrics">{metrics.map(([label,display])=><div key={label}><dt>{label}</dt><dd>{display}</dd></div>)}</dl>
    {trade.notes&&<section className="shared-trade-notes"><h2>{t('journal.analysis')}</h2><p>{trade.notes}</p></section>}
    {trade.feelings&&<section className="shared-trade-notes"><h2>{t('journal.mindsetNote')}</h2><p>{trade.feelings}</p></section>}
-   {trade.evidence.some(Boolean)&&<section className="shared-trade-evidence"><div><span className="eyebrow">{t('share.visualRecord')}</span><h2>{t('journal.evidenceTitle')}</h2></div><div className="trade-evidence-grid">{trade.evidence.map((present,index)=>present&&<div className="trade-evidence-slot" key={index}><strong>{t('journal.evidenceSlot')} {index+1}</strong><EvidenceImage src={`/api/share/${token}/evidence?slot=${index+1}`} alt={`${t('journal.evidencePreview')} ${index+1}`} openLabel={`${t('journal.openPreview')} ${index+1}`} closeLabel={t('journal.closePreview')}/></div>)}</div></section>}
+   {trade.evidence.some(Boolean)&&<section className="shared-trade-evidence"><div><span className="eyebrow">{t('share.visualRecord')}</span><h2>{t('journal.evidenceTitle')}</h2></div><div className="trade-evidence-grid">{trade.evidence.map((present,index)=>present&&<div className="trade-evidence-slot" key={index}><strong>{t(evidenceLabelKeys[index])}</strong><EvidenceImage src={`/api/share/${token}/evidence?slot=${index+1}`} alt={`${t('journal.evidencePreview')}: ${t(evidenceLabelKeys[index])}`} openLabel={`${t('journal.openPreview')}: ${t(evidenceLabelKeys[index])}`} closeLabel={t('journal.closePreview')}/></div>)}</div></section>}
    <footer className="shared-trade-footer"><ShieldCheck size={15}/><span>{t('share.privacy')}</span></footer>
   </article>
  </main>;

@@ -15,6 +15,7 @@ export interface Trade {
  session: string; tags: string; sourceRow: number | null; version: number;
 }
 export interface SavedInstrument {id:string;name:string;createdAt:string;updatedAt:string;}
+export interface SavedStrategy {id:string;name:string;}
 export interface TradingAccount {
  id: string; name: string; currency: string; initialBalance: string;
  breakEvenBand: string; sourceSheet: string | null; baselineBreakEven: boolean;

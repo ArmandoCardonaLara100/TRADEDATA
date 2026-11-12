@@ -25,5 +25,6 @@ export async function requireFullAdmin(userId:string){if(!await isFullAdmin(user
 export async function getAdminDashboard(range:AdminRange='30d',userPage=1,reviewStatus:AdminReviewStatus='pending',reviewPage=1):Promise<AdminDashboardData>{
  const db=await supabaseServer();
  const [result,newsResult]=await Promise.all([db.rpc('get_admin_dashboard',{p_range:range,p_user_page:userPage,p_review_status:reviewStatus,p_review_page:reviewPage}),db.rpc('get_admin_news_analytics',{p_range:range})]);
- check(result.error);check(newsResult.error);return {...dashboardSchema.parse(result.data),news:newsSchema.parse(newsResult.data)} as AdminDashboardData;
+ check(result.error);check(newsResult.error);const dashboard=dashboardSchema.parse(result.data);
+ return {...dashboard,kpis:{...dashboard.kpis,totalEvents:dashboard.features.reduce((sum,feature)=>sum+feature.total_events,0)},news:newsSchema.parse(newsResult.data)} as AdminDashboardData;
 }

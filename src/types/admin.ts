@@ -2,7 +2,7 @@ export type AdminRange='7d'|'30d'|'90d'|'all';
 export type AdminReviewStatus='all'|'pending'|'approved'|'rejected';
 
 export type AdminKpis={
- totalUsers:number;activeUsers:number;newUsers:number;tradingAccounts:number;
+ totalUsers:number;activeUsers:number;newUsers:number;totalEvents:number;tradingAccounts:number;
  dailyActiveUsers:number;weeklyActiveUsers:number;monthlyActiveUsers:number;
  trades:number;tradesToday:number;tradesThisWeek:number;tradesThisMonth:number;pendingReviews:number;
 };

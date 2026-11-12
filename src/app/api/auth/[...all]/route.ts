@@ -27,12 +27,20 @@ export const POST=(request:Request)=>handle(async()=>{
   const {data:result,error}=await client.auth.signUp({email:data.email,password:data.password,options:{
    data:{name:data.name},emailRedirectTo:new URL('/auth/callback',appUrl()).href,
   }});
-  if(error)throw new HttpError(error.status===429?429:400,error.status===429?'Too many attempts. Try again later.':'Registration could not be completed. Check your details and try again.');
+  if(error){
+   if(error.code==='over_email_send_rate_limit')throw new HttpError(429,'A confirmation email was requested too recently. Check your inbox or wait before trying again.','AUTH_EMAIL_RATE_LIMIT');
+   if(error.status===429)throw new HttpError(429,'Too many authentication attempts. Wait a moment before trying again.','AUTH_RATE_LIMIT');
+   throw new HttpError(400,'Registration could not be completed. Check your details and try again.','AUTH_REGISTRATION_FAILED');
+  }
   if(result.session && result.user)await ensureProfile(client,result.user);
   return Response.json({requiresConfirmation:!result.session});
  }
  const {data:session,error}=await client.auth.signInWithPassword({email:data.email,password:data.password});
- if(error)throw new HttpError(error.status===429?429:401,error.status===429?'Too many attempts. Try again later.':'Unable to sign in. Check your email, password, and email confirmation.');
+ if(error){
+  if(error.status===429)throw new HttpError(429,'Too many sign-in attempts. Wait a moment before trying again.','AUTH_RATE_LIMIT');
+  if(error.code==='email_not_confirmed')throw new HttpError(401,'Confirm your email before signing in.','AUTH_EMAIL_NOT_CONFIRMED');
+  throw new HttpError(401,'Unable to sign in. Check your email and password.','AUTH_INVALID_CREDENTIALS');
+ }
  await ensureProfile(client,session.user);
  return Response.json({});
 });

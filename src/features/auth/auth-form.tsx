@@ -2,12 +2,11 @@
 
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
-import {useState, type FormEvent} from 'react';
+import {useRef,useState, type FormEvent} from 'react';
 import {ArrowLeft, ArrowRight, Eye, EyeOff, ShieldCheck} from 'lucide-react';
 
 import {Button, ErrorMessage, Field} from '@/components/ui';
 import {authClient} from '@/lib/auth-client';
-import {message} from '@/lib/client';
 import {useLanguage, type MessageKey} from '@/lib/i18n';
 import {LanguageSelect, ThemeSelect} from '@/components/preference-controls';
 import {Brand} from '@/components/app-shell';
@@ -25,9 +24,23 @@ export function AuthForm({register = false, initialErrorKey}: {register?: boolea
   const [errorKey, setErrorKey] = useState<MessageKey|undefined>(initialErrorKey);
   const [show, setShow] = useState(false);
   const [notice, setNotice] = useState('');
+  const [confirmationSent,setConfirmationSent]=useState(false);
+  const submitting=useRef(false);
+
+  function authErrorKey(code?:string):MessageKey|undefined{
+    return ({
+      AUTH_EMAIL_RATE_LIMIT:'auth.emailRateLimit',
+      AUTH_RATE_LIMIT:'auth.rateLimit',
+      AUTH_EMAIL_NOT_CONFIRMED:'auth.emailNotConfirmed',
+      AUTH_INVALID_CREDENTIALS:'auth.invalidCredentials',
+      AUTH_REGISTRATION_FAILED:'auth.registrationFailure',
+    } as Record<string,MessageKey>)[code||''];
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if(submitting.current||confirmationSent)return;
+    submitting.current=true;
     setBusy(true);
     setError('');
     setErrorKey(undefined);
@@ -42,13 +55,14 @@ export function AuthForm({register = false, initialErrorKey}: {register?: boolea
       const result = register
         ? await authClient.signUp.email({...credentials, name: String(form.get('name')).trim()})
         : await authClient.signIn.email(credentials);
-      if (result.error) throw new Error(result.error.message || t('auth.signInFailure'));
-      if (result.requiresConfirmation) {setNotice(t('auth.checkEmail'));return;}
+      if(result.error){const key=authErrorKey(result.error.code);if(key)setErrorKey(key);else setError(result.error.message||t('auth.signInFailure'));return;}
+      if (result.requiresConfirmation) {setConfirmationSent(true);setNotice(t('auth.checkEmail'));return;}
       router.push('/dashboard');
       router.refresh();
     } catch (cause) {
-      setError(message(cause));
+      setError(cause instanceof Error?cause.message:t('auth.signInFailure'));
     } finally {
+      submitting.current=false;
       setBusy(false);
     }
   }
@@ -100,7 +114,7 @@ export function AuthForm({register = false, initialErrorKey}: {register?: boolea
             <button type="button" className="icon-button" aria-label={show ? t('common.hidePassword') : t('common.showPassword')} onClick={() => setShow(!show)}>{show ? <EyeOff size={18}/> : <Eye size={18}/>}</button>
           </div>
         </div>
-        <Button loading={busy} disabled={googleBusy} className="full-width">{register ? t('auth.createButton') : t('auth.signIn')}<ArrowRight size={17}/></Button>
+        <Button loading={busy} disabled={googleBusy||confirmationSent} className="full-width">{confirmationSent?t('auth.confirmationSent'):(register ? t('auth.createButton') : t('auth.signIn'))}<ArrowRight size={17}/></Button>
         <p className="auth-switch">{register ? t('auth.existing') : t('auth.new')} <Link href={register ? '/login' : '/register'}>{register ? t('auth.signInLink') : t('auth.createLink')}</Link></p>
       </form>
       <div className="auth-main-foot">{t('auth.disclaimer')}</div>

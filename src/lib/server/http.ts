@@ -2,7 +2,7 @@ import {supabaseServer} from '../supabase/server';
 import {cache} from 'react';
 import {appUrl} from './app-url';
 import {ZodError} from 'zod';
-export class HttpError extends Error {constructor(public status:number,message:string){super(message);}}
+export class HttpError extends Error {constructor(public status:number,message:string,public code?:string){super(message);}}
 export const currentUser=cache(async()=>{
  const client=await supabaseServer();
  const {data,error}=await client.auth.getUser();
@@ -22,7 +22,7 @@ export function verifyOrigin(request:Request){
 }
 export async function readJson(request:Request){if(Number(request.headers.get('content-length')||0)>100000)throw new HttpError(413,'Request is too large.');const text=await request.text();if(text.length>100000)throw new HttpError(413,'Request is too large.');try{return JSON.parse(text);}catch{throw new HttpError(400,'Invalid JSON.');}}
 export function errorResponse(error:unknown){
- if(error instanceof HttpError)return Response.json({error:error.message},{status:error.status});
+ if(error instanceof HttpError)return Response.json({error:error.message,...(error.code?{code:error.code}:{})},{status:error.status});
  if(error instanceof ZodError)return Response.json({error:error.issues.map(i=>`${i.path.join('.')}: ${i.message}`).join(' '),issues:error.issues},{status:422});
  console.error('TRADEDATA request failed',error instanceof Error?error.message:'Unknown failure');
  return Response.json({error:'The request could not be completed. Your changes were not saved. Try again.'},{status:500});

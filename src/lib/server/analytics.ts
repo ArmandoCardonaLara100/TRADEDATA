@@ -2,7 +2,7 @@ import type {Json} from '@/lib/supabase/types';
 import {supabaseServer} from '@/lib/supabase/server';
 
 export type AnalyticsFeature='overview'|'trading_journal'|'statistics'|'calendar'|'monte_carlo'|'funded_accounts'|'news'|'review'|'trade_sharing';
-export type AnalyticsEvent='overview_viewed'|'pdf_exported'|'journal_viewed'|'trade_created'|'trade_updated'|'trade_deleted'|'instrument_saved'|'statistics_viewed'|'statistics_filter_changed'|'statistics_pdf_exported'|'calendar_viewed'|'calendar_day_opened'|'monte_carlo_viewed'|'simulation_run'|'funded_accounts_viewed'|'news_viewed'|'news_filter_changed'|'news_article_opened'|'review_viewed'|'review_submitted'|'trade_share_created'|'trade_share_revoked';
+export type AnalyticsEvent='overview_viewed'|'pdf_exported'|'journal_viewed'|'trade_created'|'trade_updated'|'trade_deleted'|'instrument_saved'|'strategy_saved'|'statistics_viewed'|'statistics_filter_changed'|'statistics_pdf_exported'|'calendar_viewed'|'calendar_day_opened'|'monte_carlo_viewed'|'simulation_run'|'funded_accounts_viewed'|'news_viewed'|'news_filter_changed'|'news_article_opened'|'review_viewed'|'review_submitted'|'trade_share_created'|'trade_share_revoked';
 
 // Analytics is deliberately best-effort: a telemetry failure must never block
 // the user's journal, sharing, export, or moderation workflow.

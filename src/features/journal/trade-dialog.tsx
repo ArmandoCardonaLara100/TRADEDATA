@@ -1,6 +1,6 @@
 'use client';
-import {useEffect,useId,useState,type ClipboardEvent,type FormEvent} from 'react';
-import {BookmarkPlus,ExternalLink,ImagePlus,Link2,LoaderCircle,Pencil,RotateCcw,Trash2,Upload,X} from 'lucide-react';
+import {useEffect,useState,type ClipboardEvent,type FormEvent} from 'react';
+import {ExternalLink,ImagePlus,Link2,LoaderCircle,Pencil,RotateCcw,Trash2,Upload,X} from 'lucide-react';
 import {Modal,Button,Field,ErrorMessage} from '@/components/ui';
 import {api,message} from '@/lib/client';
 import {useWorkspace} from '@/features/workspace/context';
@@ -14,9 +14,12 @@ import {EVIDENCE_SLOTS,MAX_EVIDENCE_BYTES,evidencePathForSlot} from '@/lib/evide
 import {localTradeDate} from '@/lib/trade-date';
 import {EvidenceImage} from './evidence-image';
 import {ShareTradeDialog} from './share-trade-dialog';
+import {SavedValueField} from './saved-value-field';
 
 const imageTypes=['image/png','image/jpeg','image/webp','image/gif'];
 const mindsetValues=['euphoria','trust','neutral','fear','fomo','anxiety'] as const;
+const sessionOptions=[['Asia','journal.session.asia'],['Sydney','journal.session.sydney'],['London','journal.session.london'],['New York','journal.session.newYork'],['Other','journal.session.other']] as const;
+const evidenceLabelKeys=['journal.evidence.direction','journal.evidence.context','journal.evidence.narrative','journal.evidence.modelEntry'] as const;
 type UploadStatus='empty'|'selected'|'uploading'|'uploaded'|'error';
 type EvidenceSlot={file:File|null;status:UploadStatus;stored:boolean;remove:boolean;error:string};
 
@@ -32,18 +35,8 @@ function SelectedImage({file,alt}:{file:File;alt:string}){
 
 const localTradeTime=()=>new Intl.DateTimeFormat('en-GB',{hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date());
 
-function InstrumentField({initialValue}:{initialValue:string}){
- const {account,instruments=[],refresh,notify}=useWorkspace(),{t}=useLanguage();
- const inputId=useId(),listId=useId();
- const [value,setValue]=useState(initialValue),[working,setWorking]=useState(false),[error,setError]=useState('');
- const normalized=value.trim(),saved=instruments.find(item=>item.name.toLocaleLowerCase()===normalized.toLocaleLowerCase());
- async function save(){if(!normalized||saved)return;setWorking(true);setError('');try{await api('/api/instruments',{method:'POST',body:JSON.stringify({name:normalized})});await refresh(account?.id);notify(t('journal.instrumentSaved'));}catch(cause){setError(message(cause));}finally{setWorking(false);}}
- async function remove(id:string){setWorking(true);setError('');try{await api(`/api/instruments?id=${encodeURIComponent(id)}`,{method:'DELETE'});await refresh(account?.id);notify(t('journal.instrumentRemoved'));}catch(cause){setError(message(cause));}finally{setWorking(false);}}
- return <div className="field"><label htmlFor={inputId}>{t('journal.instrument')}</label><div className="instrument-entry"><input id={inputId} name="symbol" list={listId} placeholder="EUR/USD" maxLength={30} value={value} onChange={event=>setValue(event.target.value)}/><Button type="button" variant="ghost" disabled={working||!normalized||Boolean(saved)} onClick={()=>void save()}><BookmarkPlus size={14}/>{t(saved?'journal.instrumentSavedLabel':'journal.saveInstrument')}</Button></div><datalist id={listId}>{instruments.map(item=><option key={item.id} value={item.name}/>)}</datalist>{instruments.length>0&&<div className="saved-instrument-list" aria-label={t('journal.savedInstruments')}>{instruments.map(item=><span key={item.id}><button type="button" onClick={()=>setValue(item.name)}>{item.name}</button><button type="button" disabled={working} aria-label={t('journal.removeSavedInstrument').replace('{instrument}',item.name)} onClick={()=>void remove(item.id)}><X size={11}/></button></span>)}</div>}<small>{t('journal.instrumentHint')}</small>{error&&<small className="field-error" role="alert">{error}</small>}</div>;
-}
-
 export function TradeDialog({open,onOpenChange,trade,onPersisted,onSaved}:{open:boolean;onOpenChange:(v:boolean)=>void;trade?:Trade;onPersisted?:()=>void|Promise<void>;onSaved?:()=>void|Promise<void>}){
- const {account,refresh,notify}=useWorkspace(),{t}=useLanguage();
+ const {account,instruments=[],strategies=[],refresh,notify}=useWorkspace(),{t}=useLanguage();
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[slots,setSlots]=useState<EvidenceSlot[]>(()=>initialSlots(trade)),[persistedTrade,setPersistedTrade]=useState<Trade|undefined>(trade);
  const [grossInput,setGrossInput]=useState(numericInputValue(trade?.grossPnl??trade?.pnl)),[commissionInput,setCommissionInput]=useState(numericInputValue(trade?.commission));
  const record=persistedTrade||trade;
@@ -101,7 +94,7 @@ export function TradeDialog({open,onOpenChange,trade,onPersisted,onSaved}:{open:
   <form onSubmit={submit} className="form-stack">
    <ErrorMessage error={error}/>
    <div className="form-grid">
-    <InstrumentField initialValue={record?.symbol||''}/>
+    <SavedValueField kind="instrument" name="symbol" label={t('journal.instrument')} initialValue={record?.symbol||''} placeholder="EUR/USD" hint={t('journal.instrumentHint')} items={instruments} maxLength={30}/>
     <Field label={t('journal.tradeDate')} hint={t('journal.tradeDateHint')}><input name="date" type="date" defaultValue={record?record.date||'':localTradeDate()}/></Field>
     <Field label={`${t('journal.grossResult')} (${account?.currency||'USD'})`} hint={t('journal.grossResultHint')}><input name="grossPnl" type="number" step="0.00000001" max="1000000000000" min="-1000000000000" placeholder={t('journal.netResultPlaceholder')} value={grossInput} onChange={event=>setGrossInput(event.target.value)}/></Field>
     <Field label={`${t('journal.commission')} (${account?.currency||'USD'})`} hint={t('journal.commissionHint')}><input name="commission" type="number" step="0.00000001" max="1000000000000" min="-1000000000000" placeholder="-" value={commissionInput} onChange={event=>setCommissionInput(event.target.value)}/></Field>
@@ -114,9 +107,9 @@ export function TradeDialog({open,onOpenChange,trade,onPersisted,onSaved}:{open:
     <summary>{t('journal.context')}</summary>
     <div className="form-grid context-grid">
      <Field label={t('journal.tradeTime')} hint={t('journal.tradeTimeHint')}><input name="tradeTime" type="time" step="60" defaultValue={record?.tradeTime?.slice(0,5)||localTradeTime()}/></Field>
-     <Field label={t('journal.strategy')}><input name="strategy" maxLength={80} defaultValue={record?.strategy||''} placeholder={t('journal.strategyPlaceholder')}/></Field>
      <Field label={t('journal.grade')}><select name="setupGrade" defaultValue={record?.setupGrade||''}><option value="">{t('journal.unspecified')}</option>{['A+','A','B+','B'].map(grade=><option key={grade} value={grade}>{grade}</option>)}</select></Field>
-     <Field label={t('journal.session')}><select name="session" defaultValue={record?.session||''}><option value="">{t('journal.unspecified')}</option>{['Asia','London','New York','Other'].map(x=><option key={x}>{x}</option>)}</select></Field>
+     <div className="context-grid-wide"><SavedValueField kind="strategy" name="strategy" label={t('journal.strategy')} initialValue={record?.strategy||''} placeholder={t('journal.strategyPlaceholder')} hint={t('journal.strategyHint')} items={strategies} maxLength={80}/></div>
+     <Field label={t('journal.session')}><select name="session" defaultValue={record?.session||''}><option value="">{t('journal.unspecified')}</option>{sessionOptions.map(([value,key])=><option key={value} value={value}>{t(key)}</option>)}</select></Field>
      <Field label={t('journal.direction')}><select name="direction" defaultValue={record?.direction||''}><option value="">{t('journal.unspecified')}</option><option value="long">{t('journal.long')}</option><option value="short">{t('journal.short')}</option></select></Field>
     </div>
     <Field label={t('journal.analysis')}><textarea name="notes" rows={3} maxLength={10000} placeholder={t('journal.analysisPlaceholder')} defaultValue={record?.notes||''}/></Field>
@@ -126,9 +119,9 @@ export function TradeDialog({open,onOpenChange,trade,onPersisted,onSaved}:{open:
      <div className="evidence-heading"><div><h3 id="evidence-heading">{t('journal.evidenceTitle')}</h3><p>{t('journal.evidenceDescription')}</p></div><span>{t('journal.evidenceOptional')}</span></div>
      <div className="evidence-grid">
       {slots.map((slot,index)=>{const storedSrc=record&&slot.stored?`/api/trades/${record.id}/evidence?slot=${index+1}`:'';return <article className={`evidence-slot is-${slot.status}`} key={index} tabIndex={0} aria-label={`${t('journal.evidencePaste')}${index?` ${index+1}`:''}`} onPaste={event=>pasteImage(index,event)}>
-       <div className="evidence-slot-heading"><strong>{t('journal.evidenceSlot')} {index+1}</strong><span className={`evidence-status ${slot.status}`} role="status">{slot.status==='empty'&&slot.remove?t('journal.statusRemoved'):t(`journal.status.${slot.status}` as MessageKey)}</span></div>
+       <div className="evidence-slot-heading"><strong>{t(evidenceLabelKeys[index])}</strong><span className={`evidence-status ${slot.status}`} role="status">{slot.status==='empty'&&slot.remove?t('journal.statusRemoved'):t(`journal.status.${slot.status}` as MessageKey)}</span></div>
        <div className="evidence-media">
-        {slot.status==='uploaded'&&storedSrc?<EvidenceImage src={storedSrc} alt={`${t('journal.evidencePreview')} ${index+1}`} openLabel={`${t('journal.openPreview')} ${index+1}`} closeLabel={t('journal.closePreview')}/>:slot.file?<SelectedImage file={slot.file} alt={`${t('journal.selectedPreview')} ${index+1}`}/>:<div className="evidence-empty"><ImagePlus size={20}/><span>{t('journal.imageOrLink')}</span></div>}
+        {slot.status==='uploaded'&&storedSrc?<EvidenceImage src={storedSrc} alt={`${t('journal.evidencePreview')}: ${t(evidenceLabelKeys[index])}`} openLabel={`${t('journal.openPreview')}: ${t(evidenceLabelKeys[index])}`} closeLabel={t('journal.closePreview')}/>:slot.file?<SelectedImage file={slot.file} alt={`${t('journal.selectedPreview')}: ${t(evidenceLabelKeys[index])}`}/>:<div className="evidence-empty"><ImagePlus size={20}/><span>{t('journal.imageOrLink')}</span></div>}
         {slot.status==='uploading'&&<div className="evidence-progress" aria-label={t('journal.status.uploading')}><LoaderCircle size={22} className="spin"/></div>}
        </div>
        <div className="evidence-slot-actions">
@@ -137,7 +130,7 @@ export function TradeDialog({open,onOpenChange,trade,onPersisted,onSaved}:{open:
         {slot.status==='error'&&record&&(slot.file||slot.remove)&&<Button type="button" variant="ghost" onClick={()=>void retrySlot(index)}><RotateCcw size={14}/>{t('journal.retryUpload')}</Button>}
        </div>
        {slot.error&&<p className="evidence-slot-error" role="alert">{slot.error}</p>}
-       <Field label={`${t('journal.evidenceLink')} ${index+1}`}><input name={index===0?'evidenceUrl':`evidenceLink${index+1}`} type="url" maxLength={2048} placeholder="https://www.tradingview.com/x/…" defaultValue={index===0?record?.evidenceUrl||'':record?.additionalEvidenceUrls?.[index-1]||''}/></Field>
+       <Field label={t('journal.evidenceLinkNamed').replace('{label}',t(evidenceLabelKeys[index]))}><input name={index===0?'evidenceUrl':`evidenceLink${index+1}`} type="url" maxLength={2048} placeholder="https://www.tradingview.com/x/…" defaultValue={index===0?record?.evidenceUrl||'':record?.additionalEvidenceUrls?.[index-1]||''}/></Field>
       </article>;})}
      </div>
      <small className="evidence-hint">{t('journal.evidenceHint')}</small>
@@ -156,7 +149,7 @@ export function TradeDetails({trade,onClose,onChanged}:{trade:Trade|null;onClose
   <div className="trade-detail-result"><span className={`outcome-badge ${outcome}`}>{t(outcome==='breakeven'?'journal.breakEven':outcome==='open'?'journal.incomplete':outcome==='win'?'journal.win':'journal.loss')}</span><strong className={Number(trade.pnl)>=0?'positive':'negative'}>{trade.pnl===null?t('journal.awaitingResult'):signedMoney(Number(trade.pnl),account.currency)}</strong></div>
   <dl className="details-grid">{[[t('journal.tradeTime'),trade.tradeTime?.slice(0,5)||'—'],[t('journal.grossResult'),trade.grossPnl===null?'—':signedMoney(Number(trade.grossPnl),account.currency)],[t('journal.commission'),signedMoney(Number(trade.commission),account.currency)],[t('journal.netResult'),trade.pnl===null?'—':signedMoney(Number(trade.pnl),account.currency)],[t('journal.riskPercent'),trade.riskPercent?`${number(Number(trade.riskPercent)*100)}%`:'—'],[t('journal.plannedR'),trade.rewardRisk?`${number(Number(trade.rewardRisk))}R`:'—'],[t('journal.duration'),trade.duration===null?'—':`${number(trade.duration)} ${t('journal.minutesShort')}`],[t('journal.strategy'),trade.strategy||'—'],[t('journal.grade'),trade.setupGrade||'—'],[t('journal.mindset'),trade.mindset?t(`journal.mindset.${trade.mindset}`):'—'],[t('journal.direction'),trade.direction?t(`journal.${trade.direction}`):'—'],[t('journal.session'),trade.session||'—']].map(([k,v])=><div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
   {trade.notes&&<div className="detail-notes"><h3>{t('journal.analysis')}</h3><p>{trade.notes}</p></div>}{trade.feelings&&<div className="detail-notes"><h3>{t('journal.mindsetNote')}</h3><p>{trade.feelings}</p></div>}{trade.tags&&<p className="muted">{t('journal.tags')}: {trade.tags}</p>}
-  {(paths.some(Boolean)||links.some(Boolean))&&<section className="trade-evidence"><h3>{t('journal.evidenceTitle')}</h3><div className="trade-evidence-grid">{paths.map((path,index)=>(path||links[index])&&<div className="trade-evidence-slot" key={index}><strong>{t('journal.evidenceSlot')} {index+1}</strong>{path&&<EvidenceImage src={`/api/trades/${trade.id}/evidence?slot=${index+1}`} alt={`${t('journal.evidencePreview')} ${index+1}`} openLabel={`${t('journal.openPreview')} ${index+1}`} closeLabel={t('journal.closePreview')}/>} {links[index]&&<a href={links[index]} target="_blank" rel="noopener noreferrer" className="text-link" aria-label={`${t('journal.openEvidence')} ${index+1}`}>{t('journal.openEvidence')}<ExternalLink size={15}/></a>}</div>)}</div></section>}
+  {(paths.some(Boolean)||links.some(Boolean))&&<section className="trade-evidence"><h3>{t('journal.evidenceTitle')}</h3><div className="trade-evidence-grid">{paths.map((path,index)=>(path||links[index])&&<div className="trade-evidence-slot" key={index}><strong>{t(evidenceLabelKeys[index])}</strong>{path&&<EvidenceImage src={`/api/trades/${trade.id}/evidence?slot=${index+1}`} alt={`${t('journal.evidencePreview')}: ${t(evidenceLabelKeys[index])}`} openLabel={`${t('journal.openPreview')}: ${t(evidenceLabelKeys[index])}`} closeLabel={t('journal.closePreview')}/>} {links[index]&&<a href={links[index]} target="_blank" rel="noopener noreferrer" className="text-link" aria-label={`${t('journal.openEvidence')}: ${t(evidenceLabelKeys[index])}`}>{t('journal.openEvidence')}<ExternalLink size={15}/></a>}</div>)}</div></section>}
   {trade.sourceRow&&<p className="source-caption">{t('journal.sourceCaption').replace('{sheet}',account.sourceSheet||'').replace('{row}',String(trade.sourceRow))}</p>}
   <div className="dialog-actions spread"><Button variant="ghost" onClick={()=>setDeleting(true)}><Trash2 size={15}/>{t('journal.delete')}</Button><div className="trade-detail-actions"><Button variant="secondary" onClick={()=>setSharing(true)}><Link2 size={15}/>{t('share.action')}</Button><Button onClick={()=>setEditing(true)}><Pencil size={15}/>{t('journal.edit')}</Button></div></div>
  </Modal><TradeDialog key={`${trade.id}-${trade.version}`} open={editing} onOpenChange={setEditing} trade={trade} onPersisted={onChanged} onSaved={onClose}/><ShareTradeDialog tradeId={trade.id} sequence={trade.sequence} open={sharing} onOpenChange={setSharing}/><Modal open={deleting} onOpenChange={setDeleting} title={t('journal.deleteTitle')} description={t('journal.deleteDescription').replace('{number}',String(trade.sequence))}><ErrorMessage error={error}/><div className="dialog-actions"><Button variant="secondary" onClick={()=>setDeleting(false)}>{t('journal.keep')}</Button><Button variant="danger" loading={busy} onClick={remove}>{t('journal.delete')}</Button></div></Modal></>;
