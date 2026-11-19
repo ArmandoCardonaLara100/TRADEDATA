@@ -4,7 +4,7 @@ import {useEffect,useRef,useState} from 'react';
 import Script from 'next/script';
 import {usePathname} from 'next/navigation';
 
-const pixelId='1137213785581868';
+const pixelId='2345370079554367';
 
 export function trackCompleteRegistration(){
  if(typeof window==='undefined')return;
