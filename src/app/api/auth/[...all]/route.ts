@@ -33,7 +33,8 @@ export const POST=(request:Request)=>handle(async()=>{
    throw new HttpError(400,'Registration could not be completed. Check your details and try again.','AUTH_REGISTRATION_FAILED');
   }
   if(result.session && result.user)await ensureProfile(client,result.user);
-  return Response.json({requiresConfirmation:!result.session});
+  const registrationCreated=Boolean(result.user&&(result.session||(result.user.identities?.length??0)>0));
+  return Response.json({requiresConfirmation:!result.session,registrationCreated});
  }
  const {data:session,error}=await client.auth.signInWithPassword({email:data.email,password:data.password});
  if(error){

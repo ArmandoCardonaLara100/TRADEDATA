@@ -6,6 +6,11 @@ import {usePathname} from 'next/navigation';
 
 const pixelId='1137213785581868';
 
+export function trackCompleteRegistration(){
+ if(typeof window==='undefined')return;
+ try{window.fbq?.('track','CompleteRegistration');}catch{/* Analytics must never affect registration. */}
+}
+
 export function MetaPixel(){
  const pathname=usePathname();
  const previousPath=useRef<string|null>(null);

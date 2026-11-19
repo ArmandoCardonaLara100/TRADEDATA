@@ -356,10 +356,21 @@ test('the shared discipline ticker appears once on user routes and never on Admi
 });
 test('registration submits once and locks after a confirmation email is issued',async({page})=>{
  let requests=0;
- await page.route('**/api/auth/sign-up/email',async route=>{requests++;await new Promise(resolve=>setTimeout(resolve,150));await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({requiresConfirmation:true})});});
- await page.goto('/register');await page.getByLabel('Your name').fill('New Trader');await page.getByLabel('Email address').fill('new-trader@example.test');await page.getByLabel('Password',{exact:true}).fill('A-secure-password-123');
+ await page.addInitScript(()=>{const target=window as Window&{__metaEvents?:unknown[][];fbq?:(...args:unknown[])=>void};target.__metaEvents=[];target.fbq=(...args)=>target.__metaEvents?.push(args);});
+ await page.route('**/api/auth/sign-up/email',async route=>{requests++;await new Promise(resolve=>setTimeout(resolve,150));await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({requiresConfirmation:true,registrationCreated:true})});});
+ await page.goto('/register');await page.locator('input[name="name"]').fill('New Trader');await page.locator('input[name="email"]').fill('new-trader@example.test');await page.locator('#password').fill('A-secure-password-123');
  await page.locator('form').evaluate(form=>{const element=form as HTMLFormElement;element.requestSubmit();element.requestSubmit();});
- await expect(page.getByText('Check your email to confirm your account, then sign in.')).toBeVisible();expect(requests).toBe(1);await expect(page.getByRole('button',{name:/Confirmation email sent/})).toBeDisabled();
+ await expect(page.getByRole('status')).toBeVisible();expect(requests).toBe(1);await expect(page.locator('.auth-form button.button.primary')).toBeDisabled();
+ expect(await page.evaluate(()=>((window as Window&{__metaEvents?:unknown[][]}).__metaEvents||[]).filter(event=>event[0]==='track'&&event[1]==='CompleteRegistration'))).toHaveLength(1);
+});
+test('failed registrations and normal sign-ins do not send CompleteRegistration',async({page})=>{
+ await page.addInitScript(()=>{const target=window as Window&{__metaEvents?:unknown[][];fbq?:(...args:unknown[])=>void};target.__metaEvents=[];target.fbq=(...args)=>target.__metaEvents?.push(args);});
+ let signInRequests=0;
+ await page.route('**/api/auth/sign-up/email',route=>route.fulfill({status:400,contentType:'application/json',body:JSON.stringify({error:'Registration could not be completed.',code:'AUTH_REGISTRATION_FAILED'})}));
+ await page.route('**/api/auth/sign-in/email',async route=>{signInRequests++;await route.fulfill({status:200,contentType:'application/json',body:'{}'});});
+ await page.goto('/register');await page.locator('input[name="name"]').fill('New Trader');await page.locator('input[name="email"]').fill('new-trader@example.test');await page.locator('#password').fill('A-secure-password-123');await page.locator('.auth-form button.button.primary').click();await expect(page.locator('.error-message')).toBeVisible();
+ await page.goto('/login');await page.locator('input[name="email"]').fill('existing@example.test');await page.locator('#password').fill('existing-password');await page.locator('.auth-form button.button.primary').click();await expect.poll(()=>signInRequests).toBe(1);
+ expect(await page.evaluate(()=>((window as Window&{__metaEvents?:unknown[][]}).__metaEvents||[]).filter(event=>event[0]==='track'&&event[1]==='CompleteRegistration'))).toHaveLength(0);
 });
 test('public authentication navigation and Google OAuth initiation are complete',async({page,request})=>{
  await page.goto('/');const lightLogo=page.locator('.landing-header .brand-logo-light'),darkLogo=page.locator('.landing-header .brand-logo-dark');await expect(lightLogo).toHaveAttribute('src',/logo3\.png/);await expect(darkLogo).toHaveAttribute('src',/logo2\.png/);await page.getByLabel('Color theme').selectOption('light');await expect(lightLogo).toBeVisible();await expect(darkLogo).toBeHidden();await page.getByLabel('Color theme').selectOption('dark');await expect(darkLogo).toBeVisible();await expect(lightLogo).toBeHidden();await page.emulateMedia({colorScheme:'dark'});await page.getByLabel('Color theme').selectOption('system');await expect(darkLogo).toBeVisible();await page.emulateMedia({colorScheme:'light'});await expect(lightLogo).toBeVisible();const icon=await request.get('/icon.png');expect(icon.status()).toBe(200);expect(icon.headers()['content-type']).toContain('image/png');await page.getByRole('link',{name:'Log in',exact:true}).click();await expect(page).toHaveURL(/\/login$/);
