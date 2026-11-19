@@ -47,8 +47,8 @@ export const literalMessageKeys:Record<string,MessageKey>={'ACCOUNT OVERVIEW':'p
 type Context={language:Language;setLanguage:(value:Language)=>void;t:(key:MessageKey)=>string};
 const LanguageContext=createContext<Context|null>(null);
 export function LanguageProvider({children}:{children:ReactNode}){
- const [language,setLanguageState]=useState<Language>('en');
- useEffect(()=>{const saved=localStorage.getItem(STORAGE_KEY);const initial=saved==='en'||saved==='es'?saved:navigator.language.toLowerCase().startsWith('es')?'es':'en';setLanguageState(initial);document.documentElement.lang=initial;},[]);
+ const [language,setLanguageState]=useState<Language>('es');
+ useEffect(()=>{const saved=localStorage.getItem(STORAGE_KEY);const initial=saved==='en'||saved==='es'?saved:'es';setLanguageState(initial);document.documentElement.lang=initial;},[]);
  const setLanguage=(value:Language)=>{setLanguageState(value);localStorage.setItem(STORAGE_KEY,value);document.documentElement.lang=value;};
  const value=useMemo(()=>({language,setLanguage,t:(key:MessageKey)=>messages[language][key]||messages.en[key]||key}),[language]);
  return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;
