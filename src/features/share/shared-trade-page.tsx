@@ -21,7 +21,7 @@ export function SharedTradePage({token,trade}:{token:string;trade:SharedTrade|nu
   [t('journal.grossResult'),trade.grossPnl===null?'—':signedMoney(Number(trade.grossPnl),trade.currency)],
   [t('journal.commission'),signedMoney(Number(trade.commission),trade.currency)],
   [t('journal.netResult'),trade.pnl===null?'—':signedMoney(Number(trade.pnl),trade.currency)],
-  [t('journal.riskPercent'),trade.riskPercent?`${number(Number(trade.riskPercent)*100)}%`:'—'],
+  [t('journal.riskPlannedPercent'),trade.riskPercent===null?'—':`${number(Number(trade.riskPercent)*100)}%`],
   [t('journal.plannedR'),trade.rewardRisk?`${number(Number(trade.rewardRisk))}R`:'—'],
   [t('journal.duration'),trade.duration===null?'—':`${number(trade.duration)} min`],
   [t('journal.strategy'),value(trade.strategy)],

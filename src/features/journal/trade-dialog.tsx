@@ -10,6 +10,7 @@ import type {Trade} from '@/types/trading';
 import {number,signedMoney} from '@/lib/format';
 import {classify} from '@/lib/analytics/journal';
 import {numericInputValue} from '@/lib/numeric-input';
+import {tradeResultPercent} from '@/lib/calculations/trade-return';
 import {EVIDENCE_SLOTS,MAX_EVIDENCE_BYTES,evidencePathForSlot} from '@/lib/evidence';
 import {localTradeDate} from '@/lib/trade-date';
 import {EvidenceImage} from './evidence-image';
@@ -49,6 +50,7 @@ export function TradeDialog({open,onOpenChange,trade,onPersisted,onSaved}:{open:
  }
  let netPreview='';
  try{if(grossInput.trim())netPreview=new D(grossInput).plus(new D(commissionInput||0).abs().negated()).toString();}catch{/* Validation displays when submitted. */}
+ const calculatedRisk=tradeResultPercent(netPreview||null,account?.initialBalance);
  function pasteImage(index:number,event:ClipboardEvent<HTMLElement>){
   const file=[...event.clipboardData.items].find(item=>item.type.startsWith('image/'))?.getAsFile();
   if(file){event.preventDefault();chooseImage(index,file);}
@@ -93,13 +95,16 @@ export function TradeDialog({open,onOpenChange,trade,onPersisted,onSaved}:{open:
  return <Modal open={open} onOpenChange={onOpenChange} title={record?t('journal.editTitle').replace('{number}',String(record.sequence)):t('journal.recordTitle')} description={t('journal.formDescription')} wide>
   <form onSubmit={submit} className="form-stack">
    <ErrorMessage error={error}/>
-   <div className="form-grid">
+   <div className="form-grid trade-form-grid">
     <SavedValueField kind="instrument" name="symbol" label={t('journal.instrument')} initialValue={record?.symbol||''} placeholder="EUR/USD" hint={t('journal.instrumentHint')} items={instruments} maxLength={30}/>
     <Field label={t('journal.tradeDate')} hint={t('journal.tradeDateHint')}><input name="date" type="date" defaultValue={record?record.date||'':localTradeDate()}/></Field>
     <Field label={`${t('journal.grossResult')} (${account?.currency||'USD'})`} hint={t('journal.grossResultHint')}><input name="grossPnl" type="number" step="0.00000001" max="1000000000000" min="-1000000000000" placeholder={t('journal.netResultPlaceholder')} value={grossInput} onChange={event=>setGrossInput(event.target.value)}/></Field>
     <Field label={`${t('journal.commission')} (${account?.currency||'USD'})`} hint={t('journal.commissionHint')}><input name="commission" type="number" step="0.00000001" max="1000000000000" min="-1000000000000" placeholder="-" value={commissionInput} onChange={event=>setCommissionInput(event.target.value)}/></Field>
     <Field label={`${t('journal.netResult')} (${account?.currency||'USD'})`} hint={t('journal.netResultFormula')}><output className={`net-result-preview ${netPreview&&Number(netPreview)<0?'negative':netPreview?'positive':''}`}>{netPreview?number(Number(netPreview)):'—'}</output></Field>
-    <Field label={t('journal.riskPercent')}><input name="riskPercent" type="number" min="0" max="100" step="0.000001" placeholder="1.00" defaultValue={record?.riskPercent?numericInputValue(record.riskPercent,100):''}/></Field>
+    <div className="trade-risk-fields">
+     <Field label={t('journal.riskPercent')} hint={t('journal.riskPercentFormula')}><output className={`net-result-preview ${calculatedRisk!==null&&Number(calculatedRisk)<0?'negative':calculatedRisk!==null&&Number(calculatedRisk)>0?'positive':''}`}>{calculatedRisk===null?'—':`${Number(calculatedRisk)>0?'+':''}${number(Number(calculatedRisk))}%`}</output></Field>
+     <Field label={t('journal.riskPlannedPercent')}><input name="riskPercent" type="number" min="0" max="100" step="0.000001" placeholder="1.00" defaultValue={record?.riskPercent?numericInputValue(record.riskPercent,100):''}/></Field>
+    </div>
     <Field label={t('journal.plannedR')}><input name="rewardRisk" type="number" min="0" max="1000" step="0.00000001" placeholder="2.50" defaultValue={numericInputValue(record?.rewardRisk)}/></Field>
     <Field label={t('journal.duration')}><input name="duration" type="number" min="0" max="10000000" step="0.01" placeholder="30" defaultValue={numericInputValue(record?.duration)}/></Field>
    </div>
@@ -143,11 +148,11 @@ export function TradeDialog({open,onOpenChange,trade,onPersisted,onSaved}:{open:
 
 export function TradeDetails({trade,onClose,onChanged}:{trade:Trade|null;onClose:()=>void;onChanged?:()=>void|Promise<void>}){
  const {account,refresh,notify}=useWorkspace(),{t}=useLanguage();const [editing,setEditing]=useState(false),[deleting,setDeleting]=useState(false),[sharing,setSharing]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('');if(!trade||!account)return null;
- const outcome=classify(trade.pnl,account.breakEvenBand),paths=Array.from({length:EVIDENCE_SLOTS},(_,index)=>evidencePathForSlot(trade,index+1)),links=[trade.evidenceUrl,...(trade.additionalEvidenceUrls||[])],tradeId=trade.id,tradeVersion=trade.version;
+ const outcome=classify(trade.pnl,account.breakEvenBand),calculatedRisk=tradeResultPercent(trade.pnl,account.initialBalance),paths=Array.from({length:EVIDENCE_SLOTS},(_,index)=>evidencePathForSlot(trade,index+1)),links=[trade.evidenceUrl,...(trade.additionalEvidenceUrls||[])],tradeId=trade.id,tradeVersion=trade.version;
  async function remove(){setBusy(true);setError('');try{await api(`/api/trades/${tradeId}?version=${tradeVersion}`,{method:'DELETE'});await refresh();await onChanged?.();notify(t('journal.deleted'));setDeleting(false);onClose();}catch(e){setError(message(e));}finally{setBusy(false);}}
  return <><Modal open={!editing&&!deleting} onOpenChange={v=>{if(!v)onClose();}} title={`${t('journal.operation')} #${trade.sequence}`} description={`${trade.symbol||t('journal.unspecified')} · ${trade.date||t('journal.noDate')}${trade.tradeTime?` · ${trade.tradeTime.slice(0,5)}`:''}`} wide>
   <div className="trade-detail-result"><span className={`outcome-badge ${outcome}`}>{t(outcome==='breakeven'?'journal.breakEven':outcome==='open'?'journal.incomplete':outcome==='win'?'journal.win':'journal.loss')}</span><strong className={Number(trade.pnl)>=0?'positive':'negative'}>{trade.pnl===null?t('journal.awaitingResult'):signedMoney(Number(trade.pnl),account.currency)}</strong></div>
-  <dl className="details-grid">{[[t('journal.tradeTime'),trade.tradeTime?.slice(0,5)||'—'],[t('journal.grossResult'),trade.grossPnl===null?'—':signedMoney(Number(trade.grossPnl),account.currency)],[t('journal.commission'),signedMoney(Number(trade.commission),account.currency)],[t('journal.netResult'),trade.pnl===null?'—':signedMoney(Number(trade.pnl),account.currency)],[t('journal.riskPercent'),trade.riskPercent?`${number(Number(trade.riskPercent)*100)}%`:'—'],[t('journal.plannedR'),trade.rewardRisk?`${number(Number(trade.rewardRisk))}R`:'—'],[t('journal.duration'),trade.duration===null?'—':`${number(trade.duration)} ${t('journal.minutesShort')}`],[t('journal.strategy'),trade.strategy||'—'],[t('journal.grade'),trade.setupGrade||'—'],[t('journal.mindset'),trade.mindset?t(`journal.mindset.${trade.mindset}`):'—'],[t('journal.direction'),trade.direction?t(`journal.${trade.direction}`):'—'],[t('journal.session'),trade.session||'—']].map(([k,v])=><div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
+  <dl className="details-grid">{[[t('journal.tradeTime'),trade.tradeTime?.slice(0,5)||'—'],[t('journal.grossResult'),trade.grossPnl===null?'—':signedMoney(Number(trade.grossPnl),account.currency)],[t('journal.commission'),signedMoney(Number(trade.commission),account.currency)],[t('journal.netResult'),trade.pnl===null?'—':signedMoney(Number(trade.pnl),account.currency)],[t('journal.riskPercent'),calculatedRisk===null?'—':`${Number(calculatedRisk)>0?'+':''}${number(Number(calculatedRisk))}%`],[t('journal.riskPlannedPercent'),trade.riskPercent?`${number(Number(trade.riskPercent)*100)}%`:'—'],[t('journal.plannedR'),trade.rewardRisk?`${number(Number(trade.rewardRisk))}R`:'—'],[t('journal.duration'),trade.duration===null?'—':`${number(trade.duration)} ${t('journal.minutesShort')}`],[t('journal.strategy'),trade.strategy||'—'],[t('journal.grade'),trade.setupGrade||'—'],[t('journal.mindset'),trade.mindset?t(`journal.mindset.${trade.mindset}`):'—'],[t('journal.direction'),trade.direction?t(`journal.${trade.direction}`):'—'],[t('journal.session'),trade.session||'—']].map(([k,v])=><div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
   {trade.notes&&<div className="detail-notes"><h3>{t('journal.analysis')}</h3><p>{trade.notes}</p></div>}{trade.feelings&&<div className="detail-notes"><h3>{t('journal.mindsetNote')}</h3><p>{trade.feelings}</p></div>}{trade.tags&&<p className="muted">{t('journal.tags')}: {trade.tags}</p>}
   {(paths.some(Boolean)||links.some(Boolean))&&<section className="trade-evidence"><h3>{t('journal.evidenceTitle')}</h3><div className="trade-evidence-grid">{paths.map((path,index)=>(path||links[index])&&<div className="trade-evidence-slot" key={index}><strong>{t(evidenceLabelKeys[index])}</strong>{path&&<EvidenceImage src={`/api/trades/${trade.id}/evidence?slot=${index+1}`} alt={`${t('journal.evidencePreview')}: ${t(evidenceLabelKeys[index])}`} openLabel={`${t('journal.openPreview')}: ${t(evidenceLabelKeys[index])}`} closeLabel={t('journal.closePreview')}/>} {links[index]&&<a href={links[index]} target="_blank" rel="noopener noreferrer" className="text-link" aria-label={`${t('journal.openEvidence')}: ${t(evidenceLabelKeys[index])}`}>{t('journal.openEvidence')}<ExternalLink size={15}/></a>}</div>)}</div></section>}
   {trade.sourceRow&&<p className="source-caption">{t('journal.sourceCaption').replace('{sheet}',account.sourceSheet||'').replace('{row}',String(trade.sourceRow))}</p>}
